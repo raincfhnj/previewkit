@@ -52,8 +52,8 @@ func TestRenderPDFPassthrough(t *testing.T) {
 }
 
 func TestRenderOfficeRequiresConverter(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "a.docx")
-	if err := os.WriteFile(path, []byte("not a real docx"), 0o644); err != nil {
+	path := filepath.Join(t.TempDir(), "a.doc")
+	if err := os.WriteFile(path, []byte("not a real doc"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

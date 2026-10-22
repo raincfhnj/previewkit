@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"golang.org/x/sync/singleflight"
 )
 
 // Converter converts an Office document to PDF.
@@ -29,9 +27,10 @@ type Engine struct {
 	maxTextBytes int64
 	maxExcelRows int
 	maxExcelCols int
+	maxXMLBytes  int64
 	timeout      time.Duration
 
-	sf singleflight.Group
+	sf group
 }
 
 // Option configures an Engine.
@@ -74,8 +73,18 @@ func WithMaxTextBytes(n int64) Option {
 	return func(e *Engine) { e.maxTextBytes = n }
 }
 
+// WithMaxXMLBytes limits each uncompressed OOXML part in XLSX/DOCX
+// documents. The default is 32 MiB.
+func WithMaxXMLBytes(n int64) Option {
+	return func(e *Engine) {
+		if n > 0 {
+			e.maxXMLBytes = n
+		}
+	}
+}
+
 // WithMaxExcelRows limits the number of rows rendered per worksheet.
-// The default is 5000.
+// The default is 2000.
 func WithMaxExcelRows(n int) Option {
 	return func(e *Engine) {
 		if n > 0 {
@@ -85,7 +94,7 @@ func WithMaxExcelRows(n int) Option {
 }
 
 // WithMaxExcelCols limits the number of columns rendered per worksheet.
-// The default is 200.
+// The default is 100.
 func WithMaxExcelCols(n int) Option {
 	return func(e *Engine) {
 		if n > 0 {
@@ -104,8 +113,9 @@ func New(opts ...Option) *Engine {
 	e := &Engine{
 		cacheDir:     filepath.Join(cacheRoot, "previewkit"),
 		maxTextBytes: 8 << 20,
-		maxExcelRows: 5000,
-		maxExcelCols: 200,
+		maxExcelRows: 2000,
+		maxExcelCols: 100,
+		maxXMLBytes:  32 << 20,
 		timeout:      90 * time.Second,
 	}
 	for _, opt := range opts {
@@ -116,9 +126,10 @@ func New(opts ...Option) *Engine {
 
 // Render inspects path and returns a browser-previewable representation.
 //
-// Office documents require a Converter. PDF, image, audio, and video results
-// are returned as file paths; the caller is responsible for serving them with
-// Range support and a safe Content-Type.
+// Markdown, XLSX, and DOCX are rendered in-process. Legacy Office formats and
+// PPTX require a Converter. PDF, image, audio, and video results are returned
+// as file paths; the caller is responsible for serving them with Range support
+// and a safe Content-Type.
 func (e *Engine) Render(ctx context.Context, path string) (*Result, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -177,14 +188,29 @@ func (e *Engine) Render(ctx context.Context, path string) (*Result, error) {
 
 	case KindExcel:
 		html, err := RenderXLSX(abs, ExcelOptions{
-			MaxRows: e.maxExcelRows,
-			MaxCols: e.maxExcelCols,
+			MaxRows:     e.maxExcelRows,
+			MaxCols:     e.maxExcelCols,
+			MaxXMLBytes: e.maxXMLBytes,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("previewkit: render xlsx: %w", err)
 		}
 		return &Result{
 			Kind:        KindExcel,
+			ContentType: "text/html; charset=utf-8",
+			Filename:    base,
+			HTML:        html,
+			Size:        st.Size(),
+			ModTime:     st.ModTime(),
+		}, nil
+
+	case KindDocx:
+		html, err := RenderDOCX(abs, DocxOptions{MaxXMLBytes: e.maxXMLBytes})
+		if err != nil {
+			return nil, fmt.Errorf("previewkit: render docx: %w", err)
+		}
+		return &Result{
+			Kind:        KindDocx,
 			ContentType: "text/html; charset=utf-8",
 			Filename:    base,
 			HTML:        html,

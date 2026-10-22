@@ -4,11 +4,14 @@
 
 `previewkit` 不是 HTTP 服务，也不是 SaaS。它只负责把文件变成浏览器能展示的东西：
 
-- Markdown → 安全的 HTML 片段
-- TXT → UTF-8 文本（支持 UTF-8 / UTF-16 / GBK / GB18030）
-- XLSX/XLSM → HTML 表格（值、合并单元格、列宽、行高、部分样式）
+- Markdown → 安全 HTML
+- TXT → UTF-8 文本（UTF-8 / UTF-16 / GBK）
+- XLSX/XLSM → HTML 表格
+- DOCX → HTML（段落、标题、表格、列表、基础样式、图片）
 - PDF / 图片 / 音频 / 视频 → 原文件直通
-- DOC/DOCX/XLS/PPT/PPTX 等 → 通过可插拔 `Converter` 转成 PDF
+- DOC/XLS/PPT/PPTX 等复杂或旧格式 → 通过可插拔 `Converter` 转 PDF
+
+核心模块 **没有第三方 Go 依赖**，`go.mod` 只有 module 和 go 两行。Markdown、XLSX、DOCX、文本编码、并发去重全部在 `internal/` 里自己实现。
 
 许可证：**Apache-2.0**，允许商用、闭源集成、修改和再分发。
 
@@ -18,14 +21,15 @@
 
 | 能力 | 说明 |
 |---|---|
-| 纯 Go 核心 | 不依赖 CGO、不需要 LibreOffice 也能预览 md/txt/xlsx/pdf |
-| 可插拔 Office 转换 | 自带 Gotenberg 与本地 LibreOffice 两种 `Converter` |
-| 安全默认 | Markdown 经过 bluemonday 清洗；HTML 按文本预览；单元格全部转义 |
-| Range 友好 | 返回文件路径，配合 `http.ServeContent` 自动支持分页/拖动进度条 |
-| 并发安全 | `Engine` 可并发使用；Office 转换按文件内容去重 |
-| 磁盘缓存 | 转换后的 PDF 按 hash 缓存，避免重复转换 |
-| 尺寸限制 | 文本大小、Excel 行列数、Office 转换超时均可配置 |
-| 宽松许可 | 核心依赖全部为 MIT/BSD/Apache，不含 AGPL/GPL |
+| 零第三方核心依赖 | 只用 Go 标准库，无 CGO、无派生仓库、无 AGPL/GPL |
+| 自研 Markdown | 安全子集，原始 HTML 一律转义，链接协议白名单 |
+| 自研 XLSX | ZIP + XML 解析，支持共享字符串、样式、合并、列宽、行高 |
+| 自研 DOCX | ZIP + XML 解析，支持段落、标题、表格、列表、超链接、内嵌图片 |
+| 自研文本编码 | UTF-8 / UTF-16 / GBK，内置紧凑 GBK 映射表 |
+| 自研 singleflight | 同一个 Office 文件并发预览只转换一次 |
+| Range 友好 | 返回文件路径，配合 `http.ServeContent` 支持 PDF 分页/视频拖动 |
+| 可插拔 Office | 自带 Gotenberg 与本地 LibreOffice 适配器，均只用标准库 |
+| 商用友好 | Apache-2.0，核心不含 AGPL/GPL |
 
 ---
 
@@ -33,19 +37,19 @@
 
 需要 Go 1.26+。
 
-当前 `go.mod` 的 module 名是 `previewkit`，方便本地开发。发布到 GitHub/Gitee 后，把第一行改成你的仓库地址，例如：
+当前 `go.mod` 的 module 名是 `previewkit`，方便本地开发。发布到 GitHub/Gitee 后，把第一行改成你的仓库地址：
 
-```go
+```
 module github.com/yourname/previewkit
 ```
 
-然后其他项目：
+其他项目引用：
 
-```bash
-go get github.com/yourname/previewkit
+```
+require github.com/yourname/previewkit v0.1.0
 ```
 
-本地引用时也可以先用 `replace`：
+本地开发也可以：
 
 ```
 require previewkit v0.0.0
@@ -62,7 +66,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"previewkit"
 )
@@ -78,18 +81,20 @@ func main() {
 
 	switch {
 	case res.IsHTML():
-		// res.HTML 是已清洗的 HTML 片段，可直接放进模板
 		fmt.Println(string(res.HTML))
 	case res.IsText():
 		fmt.Println(res.Text)
 	case res.IsFile():
-		// PDF / 图片 / 音视频 / 转换后的 Office PDF
 		fmt.Println(res.ContentType, res.FilePath)
 	}
 }
 ```
 
-### 返回结果
+DOCX 和 XLSX 默认就能预览，不需要任何外部程序。
+
+---
+
+## 返回结果
 
 ```go
 type Result struct {
@@ -97,9 +102,9 @@ type Result struct {
 	ContentType string
 	Filename    string
 
-	HTML template.HTML // Markdown / Excel
+	HTML template.HTML // Markdown / XLSX / DOCX
 	Text string        // TXT
-	FilePath string    // PDF / 图片 / 音视频 / Office 转换结果
+	FilePath string    // PDF / 图片 / 音视频 / 转换后的 Office PDF
 
 	Size      int64
 	ModTime   time.Time
@@ -107,7 +112,7 @@ type Result struct {
 }
 ```
 
-- `IsHTML()`：Markdown / Excel
+- `IsHTML()`：Markdown / XLSX / DOCX
 - `IsText()`：TXT
 - `IsFile()`：PDF / 图片 / 音频 / 视频 / 转换后的 Office PDF
 - `Close()`：释放 `WithoutCache()` 产生的临时文件
@@ -156,23 +161,96 @@ func previewHandler(engine *previewkit.Engine) http.HandlerFunc {
 }
 ```
 
-PDF 建议交给 PDF.js 渲染：
+PDF 建议交给 PDF.js：
 
 ```html
 <iframe src="/static/pdfjs/web/viewer.html?file=/api/files/123/raw"></iframe>
 ```
 
-PDF.js 是 Apache-2.0，可商用；它不是本库的依赖，需要你自己放进前端静态资源。
+PDF.js 是 Apache-2.0，可商用；它不是本库依赖，需要你自己放进前端静态资源。
 
 ---
 
-## Office 文档
+## DOCX 自研渲染
 
-Office 文档必须经过转换，`previewkit` 不自己实现 Word/Excel 排版。
+`.docx` 不需要 Converter。当前支持：
 
-### 方式一：Gotenberg（推荐）
+- 段落、标题（Heading 1–6）
+- 粗体、斜体、下划线、删除线
+- 字号、字体颜色、高亮/底纹
+- 左/中/右/两端对齐
+- 无序列表、有序列表（基础编号）
+- 表格、`gridSpan` 横向合并
+- 超链接（http/https/mailto）
+- 内嵌 PNG/JPEG/GIF/WebP/BMP 图片（data URI）
+- 多段落、嵌套表格
 
-Gotenberg 是 Go 写的转换服务，MIT 协议，内部使用 LibreOffice。
+明确不支持：
+
+- 浮动图片、文本框、艺术字
+- 图表、SmartArt、公式（OMML）
+- 页眉页脚、批注、修订
+- 分栏、精确分页
+- `vMerge` 纵向合并（会退化为空单元格）
+- `.doc` 旧二进制格式
+
+这是“内容预览”，不是“像素级 Word 排版”。需要高保真时，仍然应该用 LibreOffice/OnlyOffice。
+
+---
+
+## XLSX 自研渲染
+
+`.xlsx` / `.xlsm` 不需要 Converter。当前支持：
+
+- 多 sheet + tab
+- 共享字符串、内联字符串
+- 数字、布尔、错误值
+- 日期/时间（内置日期格式）
+- 百分比
+- 合并单元格 `rowspan` / `colspan`
+- 列宽、行高
+- 粗体、斜体、下划线、删除线
+- 字号、字体颜色、背景填充色
+- 水平/垂直对齐、自动换行
+
+明确不支持：
+
+- 图表
+- 图片、形状
+- 条件格式
+- 数据透视表
+- 公式计算（只显示 Excel 缓存值）
+- 复杂自定义数字格式
+
+每张表默认最多渲染 2000 行、100 列：
+
+```go
+engine := previewkit.New(
+	previewkit.WithMaxExcelRows(2000),
+	previewkit.WithMaxExcelCols(100),
+)
+```
+
+---
+
+## 旧格式与 PPT：Converter
+
+以下格式不自己实现排版，交给外部转换器：
+
+- `.doc`
+- `.xls`
+- `.ppt` / `.pptx`
+- `.docm` / `.dotx` / `.dotm`
+- `.odt` / `.ods` / `.odp`
+- `.rtf` / `.wps` / `.et` / `.dps`
+
+```go
+type Converter interface {
+	ConvertToPDF(ctx context.Context, filename string, r io.Reader) ([]byte, error)
+}
+```
+
+### Gotenberg
 
 ```bash
 docker run --rm -p 3000:3000 gotenberg/gotenberg:8-libreoffice
@@ -189,19 +267,7 @@ engine := previewkit.New(
 )
 ```
 
-中文文档建议构建带字体的镜像：
-
-```dockerfile
-FROM gotenberg/gotenberg:8-libreoffice
-USER root
-COPY fonts/ /usr/share/fonts/truetype/custom/
-RUN fc-cache -f
-USER gotenberg
-```
-
-字体至少放 Noto Sans CJK、文泉驿正黑、Liberation、Carlito、Caladea。
-
-### 方式二：本机 LibreOffice
+### 本机 LibreOffice
 
 ```go
 import "previewkit/libreoffice"
@@ -211,70 +277,33 @@ engine := previewkit.New(
 )
 ```
 
-`libreoffice.New` 会为每次转换创建独立的 `UserInstallation` 临时目录，避免并发时互相锁住。生产环境建议直接用 Gotenberg，把 `soffice` 隔离在容器里。
+`libreoffice.New` 会为每次转换创建独立的 `UserInstallation` 临时目录，避免并发锁。
 
-### 方式三：自定义 Converter
+### 自定义 Converter
 
 ```go
 type MyConverter struct{}
 
 func (MyConverter) ConvertToPDF(ctx context.Context, name string, r io.Reader) ([]byte, error) {
-	// 调你的 OnlyOffice / 商业 SDK / 远程转换服务
+	// 调 OnlyOffice / 商业 SDK / 远程转换服务
 }
 ```
 
-```go
-engine := previewkit.New(previewkit.WithConverter(MyConverter{}))
-```
-
 ---
 
-## 支持的格式
+## 支持格式
 
-| 格式 | 结果 | 依赖 |
+| 格式 | 结果 | 实现 |
 |---|---|---|
-| `.md` `.markdown` | 安全 HTML | goldmark + bluemonday |
-| `.txt` `.log` `.csv` `.json` `.xml` `.yaml` 代码 | 文本 | 纯 Go |
-| `.xlsx` `.xlsm` | HTML 表格 | excelize |
-| `.pdf` | 原文件 | 无 |
-| `.jpg` `.png` `.gif` `.webp` `.svg` 等 | 原文件 | 无 |
-| `.mp4` `.webm` `.mov` | 原文件 | 无 |
-| `.mp3` `.wav` `.m4a` | 原文件 | 无 |
-| `.doc` `.docx` `.xls` `.ppt` `.pptx` `.odt` `.rtf` 等 | 转换后的 PDF | Converter |
-
-`.xls`、`.doc`、`.ppt` 旧格式必须走 Converter，excelize 只支持 OOXML。
-
----
-
-## XLSX 渲染范围
-
-已支持：
-
-- 单元格值
-- 多 sheet + tab
-- 合并单元格 `rowspan` / `colspan`
-- 列宽、行高
-- 粗体、斜体、下划线、字号、字体颜色
-- 背景填充色
-- 水平/垂直对齐、自动换行
-
-不支持：
-
-- 图表
-- 图片、形状
-- 条件格式
-- 数据透视表
-- 公式计算（只显示 Excel 缓存值）
-- 复杂数字格式的完整还原
-
-每张表默认最多渲染 5000 行、200 列，可配置：
-
-```go
-engine := previewkit.New(
-	previewkit.WithMaxExcelRows(2000),
-	previewkit.WithMaxExcelCols(80),
-)
-```
+| `.md` `.markdown` | 安全 HTML | 自研 |
+| `.txt` `.log` `.csv` `.json` `.xml` `.yaml` 代码 | 文本 | 自研 |
+| `.xlsx` `.xlsm` | HTML 表格 | 自研 |
+| `.docx` | HTML | 自研 |
+| `.pdf` | 原文件 | 直通 |
+| `.jpg` `.png` `.gif` `.webp` `.svg` 等 | 原文件 | 直通 |
+| `.mp4` `.webm` `.mov` | 原文件 | 直通 |
+| `.mp3` `.wav` `.m4a` | 原文件 | 直通 |
+| `.doc` `.xls` `.ppt` `.pptx` `.odt` `.rtf` 等 | PDF | Converter |
 
 ---
 
@@ -289,9 +318,16 @@ engine := previewkit.New(
 
 .pk-table { border-collapse: collapse; table-layout: fixed; }
 .pk-cell { border: 1px solid #d1d5db; padding: 4px 8px; vertical-align: middle; }
+
+.pk-docx { max-width: 900px; margin: 24px auto; }
+.pk-docx-p { white-space: pre-wrap; margin: 0 0 0.8em; }
+.pk-docx-table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+.pk-docx-cell { border: 1px solid #d1d5db; padding: 6px 8px; vertical-align: top; }
+.pk-docx-marker { display: inline-block; min-width: 1.5em; }
+.pk-docx-page-break { border: 0; border-top: 1px dashed #9ca3af; margin: 1.5em 0; }
 ```
 
-sheet 切换：
+XLSX sheet 切换：
 
 ```js
 document.querySelectorAll('.pk-tab').forEach(btn => {
@@ -315,8 +351,9 @@ engine := previewkit.New(
 	previewkit.WithCacheDir("/var/cache/previewkit"),
 	previewkit.WithTimeout(90*time.Second),
 	previewkit.WithMaxTextBytes(8<<20),
-	previewkit.WithMaxExcelRows(5000),
-	previewkit.WithMaxExcelCols(200),
+	previewkit.WithMaxXMLBytes(32<<20),
+	previewkit.WithMaxExcelRows(2000),
+	previewkit.WithMaxExcelCols(100),
 )
 ```
 
@@ -331,12 +368,13 @@ engine := previewkit.New(
 ## 安全建议
 
 1. **不要信任扩展名**：上传时校验 magic bytes、大小、病毒扫描。
-2. **Markdown 已清洗**：但不要给用户开放任意 HTML 编辑权限。
-3. **HTML/SVG**：本库把 `.html` 按纯文本返回；`.svg` 作为图片返回。直接访问 SVG 时请加 `Content-Security-Policy: sandbox`，或放在独立域名。
-4. **路径穿越**：不要直接把用户输入的路径传给 `Render`，应该用文件 ID 查数据库得到真实路径。
-5. **转换隔离**：Gotenberg/LibreOffice 处理不可信文档时，放在独立容器，限制 CPU/内存/超时，禁止外网。
-6. **权限**：预览接口必须校验当前用户是否有权读取该文件。
-7. **缓存**：缓存目录不要暴露为静态目录。
+2. **Markdown 已安全转义**：原始 HTML 不会执行；链接只允许 http/https/mailto/相对路径。
+3. **DOCX/XLSX 文本已转义**：不会把用户内容当 HTML 执行。
+4. **SVG**：作为图片返回；直接访问时请加 `Content-Security-Policy: sandbox`，或放在独立域名。
+5. **路径穿越**：不要直接把用户输入路径传给 `Render`，应该用文件 ID 查数据库得到真实路径。
+6. **转换隔离**：Gotenberg/LibreOffice 处理不可信文档时，放在独立容器，限制 CPU/内存/超时，禁止外网。
+7. **权限**：预览接口必须校验当前用户是否有权读取该文件。
+8. **缓存**：缓存目录不要暴露为静态目录。
 
 ---
 
@@ -349,44 +387,44 @@ engine := previewkit.New(
 - 在商业闭源项目中使用
 - 修改源码
 - 再分发
-- 作为 SaaS 的一部分使用（Apache-2.0 没有 AGPL 的网络 copyleft）
+- 作为 SaaS 的一部分使用
 
 你需要：
 
-- 保留版权声明、LICENSE 和 NOTICE（如有）
+- 保留版权声明、LICENSE 和 NOTICE
 - 修改过的文件要标注修改
 - 不使用作者商标
 
-### 依赖许可证
+### 依赖情况
 
-| 依赖 | 许可证 | 是否商用友好 |
+**核心模块没有任何第三方 Go 依赖。**
+
+`internal/text/gbk.dat` 是根据 Unicode/CP936 映射生成的编码表，不包含第三方源代码。
+
+可选外部工具：
+
+| 工具 | 许可证 | 用途 |
 |---|---|---|
-| `github.com/yuin/goldmark` | MIT | 是 |
-| `github.com/microcosm-cc/bluemonday` | BSD-3-Clause | 是 |
-| `github.com/xuri/excelize/v2` | BSD-3-Clause | 是 |
-| `golang.org/x/text` | BSD-3-Clause | 是 |
-| `golang.org/x/sync` | BSD-3-Clause | 是 |
-| Gotenberg（可选外部服务） | MIT | 是 |
-| LibreOffice（可选外部程序） | MPL-2.0 / LGPL-3.0 | 是 |
-| PDF.js（可选前端） | Apache-2.0 | 是 |
+| Gotenberg | MIT | 可选 Office 转换服务 |
+| LibreOffice | MPL-2.0 / LGPL-3.0 | 可选 Office 转换引擎 |
+| PDF.js | Apache-2.0 | 可选前端 PDF 阅读器 |
 
-**本库刻意不引入**：
+**本库不包含**：
 
 - MuPDF / `go-fitz`（AGPL）
 - Poppler（GPL）
 - OnlyOffice DocumentServer（AGPL）
-
-如果以后需要这些能力，请作为可选插件单独发布，避免影响主库的闭源商用。
+- 任何二次开发/派生仓库代码
 
 ---
 
 ## 限制
 
-- Word/PPT 的版式保真度取决于 LibreOffice/Gotenberg，复杂排版会有差异。
-- 不支持 OCR；扫描版 PDF 只能显示图片，不能提取文字。
+- DOCX/XLSX 是内容预览，不是像素级 Office 排版。
+- 不支持 OCR；扫描版 PDF 只能显示，不能提取文字。
 - 不支持 Office 在线编辑；需要编辑请接 OnlyOffice/Collabora。
-- 不支持压缩包、CAD、3D、EPUB 预览；这些可以后续按 `Kind` 扩展。
-- 不负责 HTTP 鉴权、上传、存储、病毒扫描；这些由宿主应用负责。
+- 不支持压缩包、CAD、3D、EPUB 预览。
+- 不负责 HTTP 鉴权、上传、存储、病毒扫描。
 
 ---
 
@@ -411,8 +449,10 @@ go run ./examples/http
 
 ## 路线图
 
-- [ ] PDF 首页缩略图（`go-pdfium` WASM，MIT）
-- [ ] 纯 Go DOCX/PPTX 转换适配器（基于 `omnidoc`，可选子包）
+- [ ] PPTX 自研基础渲染（文本框、图片、表格）
+- [ ] DOCX `vMerge`、页眉页脚、脚注
+- [ ] XLSX 图表/图片占位
+- [ ] PDF 首页缩略图（可选 WASM 模块）
 - [ ] 异步转换任务接口
 - [ ] S3/MinIO 缓存后端
 - [ ] 压缩包目录浏览

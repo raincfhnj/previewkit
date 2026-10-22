@@ -20,8 +20,8 @@ func (f *fakeConverter) ConvertToPDF(_ context.Context, _ string, _ io.Reader) (
 
 func TestRenderOfficeWithConverterAndCache(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "a.docx")
-	if err := os.WriteFile(path, []byte("fake docx"), 0o644); err != nil {
+	path := filepath.Join(dir, "a.doc")
+	if err := os.WriteFile(path, []byte("fake doc"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -61,8 +61,8 @@ func TestRenderOfficeWithConverterAndCache(t *testing.T) {
 
 func TestWithoutCacheCleansUp(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "a.docx")
-	if err := os.WriteFile(path, []byte("fake docx"), 0o644); err != nil {
+	path := filepath.Join(dir, "a.doc")
+	if err := os.WriteFile(path, []byte("fake doc"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

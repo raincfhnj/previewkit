@@ -43,7 +43,7 @@ type Result struct {
 
 // IsHTML reports whether the result contains an HTML fragment.
 func (r *Result) IsHTML() bool {
-	return r != nil && (r.Kind == KindMarkdown || r.Kind == KindExcel)
+	return r != nil && (r.Kind == KindMarkdown || r.Kind == KindExcel || r.Kind == KindDocx)
 }
 
 // IsText reports whether the result contains decoded plain text.
