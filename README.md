@@ -1,5 +1,8 @@
 # previewkit
 
+[![CI](https://github.com/raincfhnj/previewkit/actions/workflows/ci.yml/badge.svg)](https://github.com/raincfhnj/previewkit/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/raincfhnj/previewkit.svg)](https://pkg.go.dev/github.com/raincfhnj/previewkit)
+
 一个可被其他 Go 项目直接 `import` 的文件预览库。
 
 `previewkit` 不是 HTTP 服务，也不是 SaaS。它只负责把文件变成浏览器能展示的东西：
@@ -8,10 +11,11 @@
 - TXT → UTF-8 文本（UTF-8 / UTF-16 / GBK）
 - XLSX/XLSM → HTML 表格
 - DOCX → HTML（段落、标题、表格、列表、基础样式、图片）
+- PPTX → HTML（文本框、基础形状、表格、图片、幻灯片背景）
 - PDF / 图片 / 音频 / 视频 → 原文件直通
-- DOC/XLS/PPT/PPTX 等复杂或旧格式 → 通过可插拔 `Converter` 转 PDF
+- DOC/XLS/PPT 等复杂或旧格式 → 通过可插拔 `Converter` 转 PDF
 
-核心模块 **没有第三方 Go 依赖**，`go.mod` 只有 module 和 go 两行。Markdown、XLSX、DOCX、文本编码、并发去重全部在 `internal/` 里自己实现。
+核心模块 **没有第三方 Go 依赖**，`go.mod` 只有 module 和 go 两行。Markdown、XLSX、DOCX、PPTX、文本编码、并发去重全部在 `internal/` 里自己实现。
 
 许可证：**Apache-2.0**，允许商用、闭源集成、修改和再分发。
 
@@ -25,6 +29,7 @@
 | 自研 Markdown | 安全子集，原始 HTML 一律转义，链接协议白名单 |
 | 自研 XLSX | ZIP + XML 解析，支持共享字符串、样式、合并、列宽、行高 |
 | 自研 DOCX | ZIP + XML 解析，支持段落、标题、表格、列表、超链接、内嵌图片 |
+| 自研 PPTX | ZIP + XML 解析，支持文本框、形状、表格、图片、背景、占位符布局 |
 | 自研文本编码 | UTF-8 / UTF-16 / GBK，内置紧凑 GBK 映射表 |
 | 自研 singleflight | 同一个 Office 文件并发预览只转换一次 |
 | Range 友好 | 返回文件路径，配合 `http.ServeContent` 支持 PDF 分页/视频拖动 |
@@ -37,23 +42,21 @@
 
 需要 Go 1.22+。
 
-当前 `go.mod` 的 module 名是 `previewkit`，方便本地开发。发布到 GitHub/Gitee 后，把第一行改成你的仓库地址：
-
-```
-module github.com/yourname/previewkit
+```bash
+go get github.com/raincfhnj/previewkit
 ```
 
 其他项目引用：
 
 ```
-require github.com/yourname/previewkit v0.1.0
+require github.com/raincfhnj/previewkit v0.2.0
 ```
 
-本地开发也可以：
+本地开发：
 
 ```
-require previewkit v0.0.0
-replace previewkit => ../previewkit
+require github.com/raincfhnj/previewkit v0.0.0
+replace github.com/raincfhnj/previewkit => ../previewkit
 ```
 
 ---
@@ -67,7 +70,7 @@ import (
 	"context"
 	"fmt"
 
-	"previewkit"
+	"github.com/raincfhnj/previewkit"
 )
 
 func main() {
@@ -90,7 +93,7 @@ func main() {
 }
 ```
 
-DOCX 和 XLSX 默认就能预览，不需要任何外部程序。
+DOCX、XLSX 和 PPTX 默认就能预览，不需要任何外部程序。
 
 ---
 
@@ -102,7 +105,7 @@ type Result struct {
 	ContentType string
 	Filename    string
 
-	HTML template.HTML // Markdown / XLSX / DOCX
+	HTML template.HTML // Markdown / XLSX / DOCX / PPTX
 	Text string        // TXT
 	FilePath string    // PDF / 图片 / 音视频 / 转换后的 Office PDF
 
@@ -112,7 +115,7 @@ type Result struct {
 }
 ```
 
-- `IsHTML()`：Markdown / XLSX / DOCX
+- `IsHTML()`：Markdown / XLSX / DOCX / PPTX
 - `IsText()`：TXT
 - `IsFile()`：PDF / 图片 / 音频 / 视频 / 转换后的 Office PDF
 - `Close()`：释放 `WithoutCache()` 产生的临时文件
@@ -233,13 +236,41 @@ engine := previewkit.New(
 
 ---
 
-## 旧格式与 PPT：Converter
+## PPTX 自研渲染
+
+`.pptx` 不需要 Converter。当前支持：
+
+- 多页幻灯片
+- 文本框、占位符布局
+- 基础矩形、圆角矩形、椭圆
+- 填充色、边框
+- 段落对齐、项目符号
+- 粗体、斜体、下划线、删除线
+- 字号、字体颜色、高亮
+- 表格（含 `gridSpan` / `rowSpan`）
+- PNG/JPEG/GIF/WebP/BMP 图片（data URI）
+- 幻灯片背景色
+
+明确不支持：
+
+- 图表、SmartArt
+- 动画、切换
+- 主题/母版的完整继承
+- 组合形状的坐标变换
+- 视频、音频
+- 备注页
+
+需要像素级 PPT 时，仍然应该用 LibreOffice/OnlyOffice。
+
+---
+
+## 旧格式：Converter
 
 以下格式不自己实现排版，交给外部转换器：
 
 - `.doc`
 - `.xls`
-- `.ppt` / `.pptx`
+- `.ppt`
 - `.docm` / `.dotx` / `.dotm`
 - `.odt` / `.ods` / `.odp`
 - `.rtf` / `.wps` / `.et` / `.dps`
@@ -258,8 +289,8 @@ docker run --rm -p 3000:3000 gotenberg/gotenberg:8-libreoffice
 
 ```go
 import (
-	"previewkit"
-	"previewkit/gotenberg"
+	"github.com/raincfhnj/previewkit"
+	"github.com/raincfhnj/previewkit/gotenberg"
 )
 
 engine := previewkit.New(
@@ -270,7 +301,7 @@ engine := previewkit.New(
 ### 本机 LibreOffice
 
 ```go
-import "previewkit/libreoffice"
+import "github.com/raincfhnj/previewkit/libreoffice"
 
 engine := previewkit.New(
 	previewkit.WithConverter(libreoffice.New("soffice")),
@@ -299,11 +330,12 @@ func (MyConverter) ConvertToPDF(ctx context.Context, name string, r io.Reader) (
 | `.txt` `.log` `.csv` `.json` `.xml` `.yaml` 代码 | 文本 | 自研 |
 | `.xlsx` `.xlsm` | HTML 表格 | 自研 |
 | `.docx` | HTML | 自研 |
+| `.pptx` | HTML | 自研 |
 | `.pdf` | 原文件 | 直通 |
 | `.jpg` `.png` `.gif` `.webp` `.svg` 等 | 原文件 | 直通 |
 | `.mp4` `.webm` `.mov` | 原文件 | 直通 |
 | `.mp3` `.wav` `.m4a` | 原文件 | 直通 |
-| `.doc` `.xls` `.ppt` `.pptx` `.odt` `.rtf` 等 | PDF | Converter |
+| `.doc` `.xls` `.ppt` `.odt` `.rtf` 等 | PDF | Converter |
 
 ---
 
@@ -325,6 +357,15 @@ func (MyConverter) ConvertToPDF(ctx context.Context, name string, r io.Reader) (
 .pk-docx-cell { border: 1px solid #d1d5db; padding: 6px 8px; vertical-align: top; }
 .pk-docx-marker { display: inline-block; min-width: 1.5em; }
 .pk-docx-page-break { border: 0; border-top: 1px dashed #9ca3af; margin: 1.5em 0; }
+
+.pk-pptx { display: flex; flex-direction: column; gap: 24px; align-items: center; padding: 24px; background: #e5e7eb; }
+.pk-pptx-slide { position: relative; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,.18); flex: none; }
+.pk-pptx-shape { position: absolute; box-sizing: border-box; overflow: hidden; }
+.pk-pptx-text { position: absolute; inset: 0; box-sizing: border-box; overflow: hidden; }
+.pk-pptx-img { position: absolute; object-fit: contain; }
+.pk-pptx-table { width: 100%; height: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14px; }
+.pk-pptx-table td { border: 1px solid #9ca3af; padding: 4px 6px; vertical-align: top; overflow: hidden; }
+.pk-pptx-page { position: absolute; right: 8px; bottom: 6px; z-index: 10; font-size: 11px; color: #6b7280; }
 ```
 
 XLSX sheet 切换：
@@ -369,7 +410,7 @@ engine := previewkit.New(
 
 1. **不要信任扩展名**：上传时校验 magic bytes、大小、病毒扫描。
 2. **Markdown 已安全转义**：原始 HTML 不会执行；链接只允许 http/https/mailto/相对路径。
-3. **DOCX/XLSX 文本已转义**：不会把用户内容当 HTML 执行。
+3. **DOCX/XLSX/PPTX 文本已转义**：不会把用户内容当 HTML 执行。
 4. **SVG**：作为图片返回；直接访问时请加 `Content-Security-Policy: sandbox`，或放在独立域名。
 5. **路径穿越**：不要直接把用户输入路径传给 `Render`，应该用文件 ID 查数据库得到真实路径。
 6. **转换隔离**：Gotenberg/LibreOffice 处理不可信文档时，放在独立容器，限制 CPU/内存/超时，禁止外网。
@@ -449,7 +490,7 @@ go run ./examples/http
 
 ## 路线图
 
-- [ ] PPTX 自研基础渲染（文本框、图片、表格）
+- [x] PPTX 自研基础渲染（文本框、形状、表格、图片、背景）
 - [ ] DOCX `vMerge`、页眉页脚、脚注
 - [ ] XLSX 图表/图片占位
 - [ ] PDF 首页缩略图（可选 WASM 模块）

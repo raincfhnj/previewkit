@@ -11,8 +11,8 @@ exploit or a malicious document attached.
 
 ## Threat model
 
-- The library parses Markdown, XLSX, and DOCX in-process. Those parsers are
-  pure Go and memory-safe, but parser bugs are still possible.
+- The library parses Markdown, XLSX, DOCX, and PPTX in-process. Those parsers
+  are pure Go and memory-safe, but parser bugs are still possible.
 - Office conversion is performed by an external `Converter`, normally
   Gotenberg or LibreOffice. Those engines are large C/C++ codebases and must be
   isolated from the host.

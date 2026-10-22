@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"strings"
 
-	"previewkit/internal/ooxml"
+	"github.com/raincfhnj/previewkit/internal/ooxml"
 )
 
 // Options controls rendering limits.

@@ -1,6 +1,6 @@
 package previewkit
 
-import "previewkit/internal/text"
+import "github.com/raincfhnj/previewkit/internal/text"
 
 // DecodeText converts UTF-8, UTF-16 (with BOM), or GBK bytes to UTF-8.
 // Invalid input is returned with replacement characters rather than an error.

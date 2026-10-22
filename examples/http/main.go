@@ -12,8 +12,8 @@ import (
 	"net/url"
 	"os"
 
-	"previewkit"
-	"previewkit/gotenberg"
+	"github.com/raincfhnj/previewkit"
+	"github.com/raincfhnj/previewkit/gotenberg"
 )
 
 var page = template.Must(template.New("page").Parse(`<!doctype html>

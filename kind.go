@@ -14,6 +14,7 @@ const (
 	KindText        Kind = "text"
 	KindExcel       Kind = "excel"
 	KindDocx        Kind = "docx"
+	KindPptx        Kind = "pptx"
 	KindPDF         Kind = "pdf"
 	KindOffice      Kind = "office"
 	KindImage       Kind = "image"
@@ -53,9 +54,12 @@ func DetectKind(name string) Kind {
 	case ".docx":
 		return KindDocx
 
+	case ".pptx":
+		return KindPptx
+
 	case ".doc", ".docm", ".dot", ".dotx", ".dotm",
 		".xls", ".xlsb", ".xlt", ".xla",
-		".ppt", ".pptx", ".pptm", ".pot", ".potx", ".pps", ".ppsx",
+		".ppt", ".pptm", ".pot", ".potx", ".pps", ".ppsx",
 		".odt", ".ods", ".odp", ".ott", ".ots", ".otp",
 		".rtf", ".wps", ".et", ".dps":
 		return KindOffice

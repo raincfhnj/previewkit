@@ -14,7 +14,7 @@ func TestDetectKind(t *testing.T) {
 		"a.pdf":      KindPDF,
 		"a.docx":     KindDocx,
 		"a.doc":      KindOffice,
-		"a.pptx":     KindOffice,
+		"a.pptx":     KindPptx,
 		"a.png":      KindImage,
 		"a.svg":      KindImage,
 		"a.mp4":      KindVideo,

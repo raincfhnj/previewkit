@@ -112,6 +112,19 @@ func (n *Node) Attr(local string) string {
 	return ""
 }
 
+// AttrNS returns an attribute value by namespace URI and local name.
+func (n *Node) AttrNS(space, local string) string {
+	if n == nil {
+		return ""
+	}
+	for _, a := range n.Attrs {
+		if a.Name.Local == local && a.Name.Space == space {
+			return a.Value
+		}
+	}
+	return ""
+}
+
 // TextContent concatenates text nodes recursively.
 func (n *Node) TextContent() string {
 	if n == nil {

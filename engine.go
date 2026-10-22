@@ -111,7 +111,7 @@ func New(opts ...Option) *Engine {
 	}
 
 	e := &Engine{
-		cacheDir:     filepath.Join(cacheRoot, "previewkit"),
+		cacheDir:     filepath.Join(cacheRoot, "github.com/raincfhnj/previewkit"),
 		maxTextBytes: 8 << 20,
 		maxExcelRows: 2000,
 		maxExcelCols: 100,
@@ -126,10 +126,10 @@ func New(opts ...Option) *Engine {
 
 // Render inspects path and returns a browser-previewable representation.
 //
-// Markdown, XLSX, and DOCX are rendered in-process. Legacy Office formats and
-// PPTX require a Converter. PDF, image, audio, and video results are returned
-// as file paths; the caller is responsible for serving them with Range support
-// and a safe Content-Type.
+// Markdown, XLSX, DOCX, and PPTX are rendered in-process. Legacy Office
+// formats require a Converter. PDF, image, audio, and video results are
+// returned as file paths; the caller is responsible for serving them with
+// Range support and a safe Content-Type.
 func (e *Engine) Render(ctx context.Context, path string) (*Result, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -211,6 +211,20 @@ func (e *Engine) Render(ctx context.Context, path string) (*Result, error) {
 		}
 		return &Result{
 			Kind:        KindDocx,
+			ContentType: "text/html; charset=utf-8",
+			Filename:    base,
+			HTML:        html,
+			Size:        st.Size(),
+			ModTime:     st.ModTime(),
+		}, nil
+
+	case KindPptx:
+		html, err := RenderPPTX(abs, PptxOptions{MaxXMLBytes: e.maxXMLBytes})
+		if err != nil {
+			return nil, fmt.Errorf("previewkit: render pptx: %w", err)
+		}
+		return &Result{
+			Kind:        KindPptx,
 			ContentType: "text/html; charset=utf-8",
 			Filename:    base,
 			HTML:        html,

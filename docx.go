@@ -3,7 +3,7 @@ package previewkit
 import (
 	"html/template"
 
-	"previewkit/internal/docx"
+	"github.com/raincfhnj/previewkit/internal/docx"
 )
 
 // DocxOptions controls DOCX rendering limits.

@@ -14,8 +14,10 @@
 - Replaced `golang.org/x/sync/singleflight` with an in-process implementation.
 - Added OOXML part and image size limits.
 - DOCX no longer requires an external converter.
-- Legacy Office formats and PPTX continue to use the pluggable `Converter`
-  interface (Gotenberg or local LibreOffice).
+- Added a self-implemented PPTX reader/renderer (text boxes, basic shapes,
+  tables, pictures, backgrounds, placeholder layout).
+- Legacy Office formats continue to use the pluggable `Converter` interface
+  (Gotenberg or local LibreOffice).
 
 ## v0.1.0
 

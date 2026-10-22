@@ -3,7 +3,7 @@ package previewkit
 import (
 	"html/template"
 
-	"previewkit/internal/markdown"
+	"github.com/raincfhnj/previewkit/internal/markdown"
 )
 
 // RenderMarkdown converts a safe CommonMark/GFM subset to an HTML fragment.

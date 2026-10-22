@@ -3,7 +3,7 @@ package previewkit
 import (
 	"html/template"
 
-	"previewkit/internal/xlsx"
+	"github.com/raincfhnj/previewkit/internal/xlsx"
 )
 
 // ExcelOptions controls spreadsheet rendering.
