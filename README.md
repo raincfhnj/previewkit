@@ -35,7 +35,7 @@
 
 ## 安装
 
-需要 Go 1.26+。
+需要 Go 1.22+。
 
 当前 `go.mod` 的 module 名是 `previewkit`，方便本地开发。发布到 GitHub/Gitee 后，把第一行改成你的仓库地址：
 

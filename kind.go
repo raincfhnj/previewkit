@@ -96,7 +96,8 @@ func ContentTypeFor(name string) string {
 	case ".json":
 		return "application/json; charset=utf-8"
 	case ".xml":
-		return "application/xml; charset=utf-8"
+		// XML can carry stylesheets; preview it as source text, not active XML.
+		return "text/plain; charset=utf-8"
 	case ".yaml", ".yml":
 		return "application/yaml; charset=utf-8"
 	case ".svg":
