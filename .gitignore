@@ -1,0 +1,14 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Local preview cache
+/.preview-cache/
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
