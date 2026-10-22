@@ -54,6 +54,19 @@ func TestRenderDOCX(t *testing.T) {
         </w:tc>
       </w:tr>
     </w:tbl>
+    <w:tbl>
+      <w:tr>
+        <w:tc>
+          <w:tcPr><w:vMerge w:val="restart"/></w:tcPr>
+          <w:p><w:r><w:t>纵向</w:t></w:r></w:p>
+        </w:tc>
+        <w:tc><w:p><w:r><w:t>右1</w:t></w:r></w:p></w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>
+        <w:tc><w:p><w:r><w:t>右2</w:t></w:r></w:p></w:tc>
+      </w:tr>
+    </w:tbl>
   </w:body>
 </w:document>`,
 	})
@@ -63,7 +76,6 @@ func TestRenderDOCX(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(out)
-	t.Logf("DOCX: %s", s)
 
 	for _, want := range []string{
 		"<h1",
@@ -74,6 +86,10 @@ func TestRenderDOCX(t *testing.T) {
 		"列表项",
 		`colspan="2"`,
 		"表格",
+		"纵向",
+		"右1",
+		"右2",
+		`rowspan="2"`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("rendered HTML does not contain %q", want)

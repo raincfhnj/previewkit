@@ -88,7 +88,6 @@ func TestRenderXLSX(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(out)
-	t.Logf("XLSX: %s", s)
 
 	for _, want := range []string{
 		"姓名",

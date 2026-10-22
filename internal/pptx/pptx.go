@@ -41,6 +41,9 @@ type relInfo struct {
 
 type rect struct {
 	x, y, w, h float64
+	rot        int
+	flipH      bool
+	flipV      bool
 }
 
 type renderer struct {
@@ -51,8 +54,9 @@ type renderer struct {
 	scale   float64
 	slideH  int
 
-	imageTotal int
-	curRels    map[string]relInfo
+	imageTotal  int
+	curRels     map[string]relInfo
+	layoutCache map[string]map[string]rect
 }
 
 type slideRef struct {
@@ -116,12 +120,13 @@ func Render(filePath string, opts Options) (template.HTML, error) {
 
 	scale := float64(opts.TargetWidth) / (float64(slideCX) / emuPerPixel)
 	r := &renderer{
-		zr:      zr,
-		opts:    opts,
-		slideCX: slideCX,
-		slideCY: slideCY,
-		scale:   scale,
-		slideH:  int(math.Round(float64(slideCY) / emuPerPixel * scale)),
+		zr:          zr,
+		opts:        opts,
+		slideCX:     slideCX,
+		slideCY:     slideCY,
+		scale:       scale,
+		slideH:      int(math.Round(float64(slideCY) / emuPerPixel * scale)),
+		layoutCache: map[string]map[string]rect{},
 	}
 
 	var b strings.Builder
@@ -278,7 +283,7 @@ func (r *renderer) renderShape(b *strings.Builder, n *ooxml.Node, layout map[str
 
 	fmt.Fprintf(b, `<div class="pk-pptx-shape" style="%s">`, html.EscapeString(style))
 	if txBody := n.Child("txBody"); txBody != nil {
-		r.renderTextBody(b, txBody, rc, true)
+		r.renderTextBody(b, txBody, true)
 	}
 	b.WriteString(`</div>`)
 }
@@ -305,8 +310,8 @@ func (r *renderer) renderPicture(b *strings.Builder, n *ooxml.Node, rels map[str
 	if src == "" {
 		return
 	}
-	fmt.Fprintf(b, `<img class="pk-pptx-img" src="%s" alt="" style="left:%.1fpx;top:%.1fpx;width:%.1fpx;height:%.1fpx">`,
-		src, rc.x, rc.y, rc.w, rc.h)
+	fmt.Fprintf(b, `<img class="pk-pptx-img" src="%s" alt="" style="%s">`,
+		src, html.EscapeString(r.shapeStyle(rc)))
 }
 
 func (r *renderer) renderGraphicFrame(b *strings.Builder, n *ooxml.Node) {
@@ -341,7 +346,7 @@ func (r *renderer) renderGraphicFrame(b *strings.Builder, n *ooxml.Node) {
 			}
 			b.WriteString(">")
 			if txBody := tc.Child("txBody"); txBody != nil {
-				r.renderParagraphs(b, txBody, false)
+				r.renderParagraphs(b, txBody)
 			}
 			b.WriteString("</td>")
 		}
@@ -351,7 +356,22 @@ func (r *renderer) renderGraphicFrame(b *strings.Builder, n *ooxml.Node) {
 }
 
 func (r *renderer) shapeStyle(rc rect) string {
-	return fmt.Sprintf("left:%.1fpx;top:%.1fpx;width:%.1fpx;height:%.1fpx;", rc.x, rc.y, rc.w, rc.h)
+	style := fmt.Sprintf("left:%.1fpx;top:%.1fpx;width:%.1fpx;height:%.1fpx;",
+		rc.x, rc.y, rc.w, rc.h)
+	if rc.rot != 0 || rc.flipH || rc.flipV {
+		style += "transform-origin:center;transform:"
+		if rc.rot != 0 {
+			style += fmt.Sprintf("rotate(%.2fdeg)", float64(rc.rot)/60000)
+		}
+		if rc.flipH {
+			style += " scaleX(-1)"
+		}
+		if rc.flipV {
+			style += " scaleY(-1)"
+		}
+		style += ";"
+	}
+	return style
 }
 
 func shapeRect(r *renderer, spPr, shape *ooxml.Node, layout map[string]rect) (rect, bool) {
@@ -389,10 +409,13 @@ func xfrmRect(r *renderer, xfrm *ooxml.Node) (rect, bool) {
 		return rect{}, false
 	}
 	return rect{
-		x: float64(x) / emuPerPixel * r.scale,
-		y: float64(y) / emuPerPixel * r.scale,
-		w: float64(w) / emuPerPixel * r.scale,
-		h: float64(h) / emuPerPixel * r.scale,
+		x:     float64(x) / emuPerPixel * r.scale,
+		y:     float64(y) / emuPerPixel * r.scale,
+		w:     float64(w) / emuPerPixel * r.scale,
+		h:     float64(h) / emuPerPixel * r.scale,
+		rot:   ooxml.ParseInt(xfrm.Attr("rot")),
+		flipH: ooxml.ParseBool(xfrm.Attr("flipH")),
+		flipV: ooxml.ParseBool(xfrm.Attr("flipV")),
 	}, true
 }
 
@@ -430,7 +453,15 @@ func (r *renderer) readLayoutPlaceholders(rels map[string]relInfo) map[string]re
 		if !strings.Contains(lower, "slidelayout") {
 			continue
 		}
+
 		layoutPath := ooxml.ResolveTarget("ppt/slides", rel.Target)
+		if cached, ok := r.layoutCache[layoutPath]; ok {
+			for k, v := range cached {
+				out[k] = v
+			}
+			continue
+		}
+
 		data, err := ooxml.ReadZipFileLimited(r.zr, layoutPath, r.opts.MaxXMLBytes)
 		if err != nil {
 			layoutPath = ooxml.ResolveTarget("ppt", rel.Target)
@@ -451,6 +482,8 @@ func (r *renderer) readLayoutPlaceholders(rels map[string]relInfo) map[string]re
 		if spTree == nil {
 			continue
 		}
+
+		found := map[string]rect{}
 		for _, sp := range spTree.Children("sp") {
 			ph := placeholder(sp)
 			if ph == nil {
@@ -461,14 +494,18 @@ func (r *renderer) readLayoutPlaceholders(rels map[string]relInfo) map[string]re
 				continue
 			}
 			if rc, ok := xfrmRect(r, spPr.Child("xfrm")); ok {
-				out[phKey(ph)] = rc
+				found[phKey(ph)] = rc
 			}
+		}
+		r.layoutCache[layoutPath] = found
+		for k, v := range found {
+			out[k] = v
 		}
 	}
 	return out
 }
 
-func (r *renderer) renderTextBody(b *strings.Builder, txBody *ooxml.Node, rc rect, flex bool) {
+func (r *renderer) renderTextBody(b *strings.Builder, txBody *ooxml.Node, flex bool) {
 	bodyPr := txBody.Child("bodyPr")
 	style := "white-space:pre-wrap;overflow:hidden;"
 	if flex {
@@ -497,11 +534,11 @@ func (r *renderer) renderTextBody(b *strings.Builder, txBody *ooxml.Node, rc rec
 			inset("bIns", 45720), inset("lIns", 91440))
 	}
 	fmt.Fprintf(b, `<div class="pk-pptx-text" style="%s">`, html.EscapeString(style))
-	r.renderParagraphs(b, txBody, true)
+	r.renderParagraphs(b, txBody)
 	b.WriteString(`</div>`)
 }
 
-func (r *renderer) renderParagraphs(b *strings.Builder, parent *ooxml.Node, flex bool) {
+func (r *renderer) renderParagraphs(b *strings.Builder, parent *ooxml.Node) {
 	for _, p := range parent.Children("p") {
 		r.renderParagraph(b, p)
 	}

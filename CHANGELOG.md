@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.0
+
+- Added DOCX vertical merge (`vMerge`) rowspan support.
+- Added PPTX rotation/flip transforms and layout placeholder caching.
+- Added a PPTX picture fixture and image pipeline test.
+- Added `examples/local`, a zero-converter HTTP example.
+- Documented the zero-dependency core and PPTX renderer scope.
+
 ## v0.2.0
 
 - Removed all third-party Go dependencies; the core module now uses only the

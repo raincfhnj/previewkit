@@ -581,39 +581,106 @@ func wrappers(cs charStyle) (string, string) {
 	return strings.Join(open, ""), strings.Join(closeTags, "")
 }
 
+type tableCell struct {
+	node    *ooxml.Node
+	colspan int
+	rowspan int
+	gridCol int
+	vmerge  string
+	skip    bool
+}
+
+type tableRow struct {
+	cells []*tableCell
+	byCol map[int]*tableCell
+}
+
 func (r *renderer) renderTable(b *strings.Builder, tbl *ooxml.Node) {
+	rows := parseTableRows(tbl)
+
 	b.WriteString(`<table class="pk-docx-table"><tbody>`)
-	for _, tr := range tbl.Children("tr") {
+	for _, row := range rows {
 		b.WriteString("<tr>")
-		for _, tc := range tr.Children("tc") {
-			colspan := 1
-			if tcPr := tc.Child("tcPr"); tcPr != nil {
-				if gs := tcPr.Child("gridSpan"); gs != nil {
-					colspan = ooxml.ParseInt(gs.Attr("val"))
-				}
-				if vm := tcPr.Child("vMerge"); vm != nil && vm.Attr("val") == "continue" {
-					b.WriteString(`<td class="pk-docx-cell"`)
-					if colspan > 1 {
-						fmt.Fprintf(b, ` colspan="%d"`, colspan)
-					}
-					b.WriteString(`></td>`)
-					continue
-				}
-			}
-			if colspan < 1 {
-				colspan = 1
+		for _, cell := range row.cells {
+			if cell.skip {
+				continue
 			}
 			b.WriteString(`<td class="pk-docx-cell"`)
-			if colspan > 1 {
-				fmt.Fprintf(b, ` colspan="%d"`, colspan)
+			if cell.colspan > 1 {
+				fmt.Fprintf(b, ` colspan="%d"`, cell.colspan)
+			}
+			if cell.rowspan > 1 {
+				fmt.Fprintf(b, ` rowspan="%d"`, cell.rowspan)
 			}
 			b.WriteString(`>`)
-			r.renderBlocks(b, tc)
+			r.renderBlocks(b, cell.node)
 			b.WriteString(`</td>`)
 		}
 		b.WriteString("</tr>")
 	}
 	b.WriteString(`</tbody></table>`)
+}
+
+func parseTableRows(tbl *ooxml.Node) []tableRow {
+	var rows []tableRow
+
+	for _, tr := range tbl.Children("tr") {
+		row := tableRow{byCol: map[int]*tableCell{}}
+		gridCol := 1
+
+		for _, tc := range tr.Children("tc") {
+			colspan, vmerge := 1, ""
+			if tcPr := tc.Child("tcPr"); tcPr != nil {
+				if gs := tcPr.Child("gridSpan"); gs != nil {
+					colspan = ooxml.ParseInt(gs.Attr("val"))
+				}
+				if vm := tcPr.Child("vMerge"); vm != nil {
+					vmerge = vm.Attr("val")
+					if vmerge == "" {
+						vmerge = "continue"
+					}
+				}
+			}
+			if colspan < 1 {
+				colspan = 1
+			}
+
+			cell := &tableCell{
+				node:    tc,
+				colspan: colspan,
+				gridCol: gridCol,
+				vmerge:  vmerge,
+			}
+			row.cells = append(row.cells, cell)
+			for c := gridCol; c < gridCol+colspan; c++ {
+				row.byCol[c] = cell
+			}
+			gridCol += colspan
+		}
+		rows = append(rows, row)
+	}
+
+	// A vMerge restart cell spans across following rows whose corresponding
+	// grid column is a vMerge continue cell.
+	for i, row := range rows {
+		for _, cell := range row.cells {
+			if cell.vmerge != "restart" {
+				continue
+			}
+			span := 1
+			for j := i + 1; j < len(rows); j++ {
+				below := rows[j].byCol[cell.gridCol]
+				if below == nil || below.vmerge != "continue" {
+					break
+				}
+				below.skip = true
+				span++
+			}
+			cell.rowspan = span
+		}
+	}
+
+	return rows
 }
 
 func (r *renderer) listMarker(numID string, ilvl int) string {

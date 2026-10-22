@@ -49,7 +49,7 @@ go get github.com/raincfhnj/previewkit
 其他项目引用：
 
 ```
-require github.com/raincfhnj/previewkit v0.2.0
+require github.com/raincfhnj/previewkit v0.3.0
 ```
 
 本地开发：
@@ -183,7 +183,7 @@ PDF.js 是 Apache-2.0，可商用；它不是本库依赖，需要你自己放�
 - 字号、字体颜色、高亮/底纹
 - 左/中/右/两端对齐
 - 无序列表、有序列表（基础编号）
-- 表格、`gridSpan` 横向合并
+- 表格、`gridSpan` 横向合并、`vMerge` 纵向合并
 - 超链接（http/https/mailto）
 - 内嵌 PNG/JPEG/GIF/WebP/BMP 图片（data URI）
 - 多段落、嵌套表格
@@ -194,7 +194,6 @@ PDF.js 是 Apache-2.0，可商用；它不是本库依赖，需要你自己放�
 - 图表、SmartArt、公式（OMML）
 - 页眉页脚、批注、修订
 - 分栏、精确分页
-- `vMerge` 纵向合并（会退化为空单元格）
 - `.doc` 旧二进制格式
 
 这是“内容预览”，不是“像素级 Word 排版”。需要高保真时，仍然应该用 LibreOffice/OnlyOffice。
@@ -480,7 +479,11 @@ go test -race ./...
 示例服务：
 
 ```bash
+# 带 Gotenberg（支持旧 Office）
 go run ./examples/http
+
+# 零外部依赖（Markdown/TXT/XLSX/DOCX/PPTX/PDF/媒体）
+go run ./examples/local
 # 浏览器访问 http://localhost:8080/preview?path=README.md
 ```
 
@@ -491,7 +494,8 @@ go run ./examples/http
 ## 路线图
 
 - [x] PPTX 自研基础渲染（文本框、形状、表格、图片、背景）
-- [ ] DOCX `vMerge`、页眉页脚、脚注
+- [x] DOCX `vMerge`
+- [ ] DOCX 页眉页脚、脚注、修订
 - [ ] XLSX 图表/图片占位
 - [ ] PDF 首页缩略图（可选 WASM 模块）
 - [ ] 异步转换任务接口

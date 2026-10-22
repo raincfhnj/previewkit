@@ -23,6 +23,7 @@ func TestRenderPPTX(t *testing.T) {
   <p:sldIdLst>
     <p:sldId id="256" r:id="rId2"/>
     <p:sldId id="257" r:id="rId3"/>
+    <p:sldId id="258" r:id="rId4"/>
   </p:sldIdLst>
   <p:sldSz cx="12192000" cy="6858000"/>
 </p:presentation>`,
@@ -30,11 +31,17 @@ func TestRenderPPTX(t *testing.T) {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
   <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide3.xml"/>
 </Relationships>`,
 		"ppt/slides/_rels/slide1.xml.rels": `<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`,
 		"ppt/slides/_rels/slide2.xml.rels": `<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`,
+		"ppt/slides/_rels/slide3.xml.rels": `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>`,
+		"ppt/media/image1.png": "\x89PNG\r\n\x1a\npreviewkit",
 		"ppt/slides/slide1.xml": `<?xml version="1.0" encoding="UTF-8"?>
 <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -75,6 +82,18 @@ func TestRenderPPTX(t *testing.T) {
     </p:sp>
   </p:spTree></p:cSld>
 </p:sld>`,
+		"ppt/slides/slide3.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+       xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:cSld><p:spTree>
+    <p:pic>
+      <p:nvPicPr><p:cNvPr id="2" name="Picture"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>
+      <p:blipFill><a:blip r:embed="rId1"/></p:blipFill>
+      <p:spPr><a:xfrm><a:off x="609600" y="914400"/><a:ext cx="1828800" cy="1828800"/></a:xfrm></p:spPr>
+    </p:pic>
+  </p:spTree></p:cSld>
+</p:sld>`,
 	})
 
 	out, err := RenderPPTX(path)
@@ -82,7 +101,6 @@ func TestRenderPPTX(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(out)
-	t.Logf("PPTX: %s", s)
 
 	for _, want := range []string{
 		`class="pk-pptx"`,
@@ -94,6 +112,8 @@ func TestRenderPPTX(t *testing.T) {
 		"第二页",
 		"font-weight:700",
 		"width:960px",
+		`class="pk-pptx-img"`,
+		"data:image/png;base64,",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("rendered HTML does not contain %q", want)
