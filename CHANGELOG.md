@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.0
+
+- PPTX: recursive group shape coordinate transforms.
+- PPTX: text, padding, indentation, and spacing scale with group transforms.
+- Added a grouped-shape fixture and assertions.
+
 ## v0.5.0
 
 - DOCX: resolve `w:themeColor` with tint/shade for text and shading.

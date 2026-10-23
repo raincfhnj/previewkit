@@ -87,6 +87,18 @@ func TestRenderPPTX(t *testing.T) {
           <a:tbl><a:tr><a:tc><a:txBody><a:p><a:r><a:t>单元格</a:t></a:r></a:p></a:txBody></a:tc></a:tr></a:tbl>
         </a:graphicData></a:graphic>
       </p:graphicFrame>
+      <p:grpSp>
+        <p:nvGrpSpPr><p:cNvPr id="9" name="Group"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+        <p:grpSpPr><a:xfrm>
+          <a:off x="609600" y="5600000"/><a:ext cx="1828800" cy="914400"/>
+          <a:chOff x="0" y="0"/><a:chExt cx="914400" cy="457200"/>
+        </a:xfrm></p:grpSpPr>
+        <p:sp>
+          <p:nvSpPr><p:cNvPr id="10" name="GroupText"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+          <p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="457200"/></a:xfrm></p:spPr>
+          <p:txBody><a:bodyPr/><a:p><a:r><a:t>组内</a:t></a:r></a:p></p:txBody>
+        </p:sp>
+      </p:grpSp>
     </p:spTree>
   </p:cSld>
 </p:sld>`,
@@ -134,6 +146,9 @@ func TestRenderPPTX(t *testing.T) {
 		"width:960px",
 		`class="pk-pptx-img"`,
 		"data:image/png;base64,",
+		"组内",
+		"left:48.0px;top:440.9px;width:144.0px;height:72.0px",
+		"font-size:36.0px",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("rendered HTML does not contain %q", want)

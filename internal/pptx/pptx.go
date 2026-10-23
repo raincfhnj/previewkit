@@ -46,6 +46,42 @@ type rect struct {
 	flipV      bool
 }
 
+// transform maps child coordinates into parent coordinates:
+// x' = a*x + e, y' = d*y + f.
+type transform struct {
+	a, d, e, f float64
+}
+
+func (t *transform) apply(rc rect) rect {
+	if t == nil {
+		return rc
+	}
+	return rect{
+		x:     t.a*rc.x + t.e,
+		y:     t.d*rc.y + t.f,
+		w:     t.a * rc.w,
+		h:     t.d * rc.h,
+		rot:   rc.rot,
+		flipH: rc.flipH,
+		flipV: rc.flipV,
+	}
+}
+
+func (t *transform) compose(child *transform) *transform {
+	if t == nil {
+		return child
+	}
+	if child == nil {
+		return t
+	}
+	return &transform{
+		a: t.a * child.a,
+		d: t.d * child.d,
+		e: t.a*child.e + t.e,
+		f: t.d*child.f + t.f,
+	}
+}
+
 type renderer struct {
 	zr      *zip.ReadCloser
 	opts    Options
@@ -58,6 +94,7 @@ type renderer struct {
 	curRels     map[string]relInfo
 	layoutCache map[string]map[string]rect
 	theme       map[string]string
+	textScale   float64
 }
 
 type slideRef struct {
@@ -129,6 +166,7 @@ func Render(filePath string, opts Options) (template.HTML, error) {
 		slideH:      int(math.Round(float64(slideCY) / emuPerPixel * scale)),
 		layoutCache: map[string]map[string]rect{},
 		theme:       ooxml.ReadThemeColors(zr, "ppt/theme/", opts.MaxXMLBytes),
+		textScale:   1,
 	}
 
 	var b strings.Builder
@@ -202,7 +240,7 @@ func (r *renderer) renderSlide(b *strings.Builder, index int, slidePath string) 
 
 	if cSld := root.Child("cSld"); cSld != nil {
 		if spTree := cSld.Child("spTree"); spTree != nil {
-			r.renderSpTree(b, spTree, rels, layout)
+			r.renderSpTree(b, spTree, rels, layout, nil)
 		}
 	}
 	b.WriteString(`</section>`)
@@ -248,24 +286,57 @@ func solidColor(n *ooxml.Node, theme map[string]string) string {
 	return ""
 }
 
-func (r *renderer) renderSpTree(b *strings.Builder, spTree *ooxml.Node, rels map[string]relInfo, layout map[string]rect) {
+func (r *renderer) renderSpTree(b *strings.Builder, spTree *ooxml.Node, rels map[string]relInfo, layout map[string]rect, tr *transform) {
 	for _, n := range spTree.Nodes {
 		switch n.Name.Local {
 		case "sp":
-			r.renderShape(b, n, layout)
+			r.renderShape(b, n, layout, tr)
 		case "pic":
-			r.renderPicture(b, n, rels)
+			r.renderPicture(b, n, rels, tr)
 		case "graphicFrame":
-			r.renderGraphicFrame(b, n)
+			r.renderGraphicFrame(b, n, tr)
 		case "grpSp":
-			r.renderSpTree(b, n, rels, layout)
+			r.renderGroup(b, n, rels, layout, tr)
 		}
 	}
 }
 
-func (r *renderer) renderShape(b *strings.Builder, n *ooxml.Node, layout map[string]rect) {
+func (r *renderer) renderGroup(b *strings.Builder, n *ooxml.Node, rels map[string]relInfo, layout map[string]rect, parent *transform) {
+	var child *transform
+	if grpPr := n.Child("grpSpPr"); grpPr != nil {
+		if xfrm := grpPr.Child("xfrm"); xfrm != nil {
+			off, ext := xfrm.Child("off"), xfrm.Child("ext")
+			chOff, chExt := xfrm.Child("chOff"), xfrm.Child("chExt")
+			if off != nil && ext != nil && chOff != nil && chExt != nil {
+				chW := ooxml.ParseInt(chExt.Attr("cx"))
+				chH := ooxml.ParseInt(chExt.Attr("cy"))
+				extW := ooxml.ParseInt(ext.Attr("cx"))
+				extH := ooxml.ParseInt(ext.Attr("cy"))
+				if chW > 0 && chH > 0 {
+					sx := float64(extW) / float64(chW)
+					sy := float64(extH) / float64(chH)
+					child = &transform{
+						a: sx,
+						d: sy,
+						e: r.px(ooxml.ParseInt(off.Attr("x"))) - r.px(ooxml.ParseInt(chOff.Attr("x")))*sx,
+						f: r.px(ooxml.ParseInt(off.Attr("y"))) - r.px(ooxml.ParseInt(chOff.Attr("y")))*sy,
+					}
+				}
+			}
+		}
+	}
+	prevScale := r.textScale
+	if child != nil && child.a > 0 {
+		r.textScale = prevScale * child.a
+	}
+	defer func() { r.textScale = prevScale }()
+
+	r.renderSpTree(b, n, rels, layout, parent.compose(child))
+}
+
+func (r *renderer) renderShape(b *strings.Builder, n *ooxml.Node, layout map[string]rect, tr *transform) {
 	spPr := n.Child("spPr")
-	rc, ok := shapeRect(r, spPr, n, layout)
+	rc, ok := shapeRect(r, spPr, n, layout, tr)
 	if !ok {
 		return
 	}
@@ -299,12 +370,13 @@ func (r *renderer) renderShape(b *strings.Builder, n *ooxml.Node, layout map[str
 	b.WriteString(`</div>`)
 }
 
-func (r *renderer) renderPicture(b *strings.Builder, n *ooxml.Node, rels map[string]relInfo) {
+func (r *renderer) renderPicture(b *strings.Builder, n *ooxml.Node, rels map[string]relInfo, tr *transform) {
 	spPr := n.Child("spPr")
 	rc, ok := xfrmRect(r, spPr.Child("xfrm"))
 	if !ok {
 		return
 	}
+	rc = tr.apply(rc)
 	blipFill := n.Child("blipFill")
 	if blipFill == nil {
 		return
@@ -325,12 +397,13 @@ func (r *renderer) renderPicture(b *strings.Builder, n *ooxml.Node, rels map[str
 		src, html.EscapeString(r.shapeStyle(rc)))
 }
 
-func (r *renderer) renderGraphicFrame(b *strings.Builder, n *ooxml.Node) {
+func (r *renderer) renderGraphicFrame(b *strings.Builder, n *ooxml.Node, tr *transform) {
 	xfrm := n.Child("xfrm")
 	rc, ok := xfrmRect(r, xfrm)
 	if !ok {
 		return
 	}
+	rc = tr.apply(rc)
 	tbl := findFirst(n, "tbl")
 	if tbl == nil {
 		return
@@ -385,22 +458,26 @@ func (r *renderer) shapeStyle(rc rect) string {
 	return style
 }
 
-func shapeRect(r *renderer, spPr, shape *ooxml.Node, layout map[string]rect) (rect, bool) {
+func shapeRect(r *renderer, spPr, shape *ooxml.Node, layout map[string]rect, tr *transform) (rect, bool) {
 	if spPr != nil {
 		if rc, ok := xfrmRect(r, spPr.Child("xfrm")); ok {
-			return rc, true
+			return tr.apply(rc), true
 		}
 	}
 	if shape != nil {
 		if ph := placeholder(shape); ph != nil {
 			if rc, ok := layout[phKey(ph)]; ok {
-				return rc, true
+				return tr.apply(rc), true
 			}
 			typ := ph.Attr("type")
-			return defaultPlaceholderRect(r, typ), true
+			return tr.apply(defaultPlaceholderRect(r, typ)), true
 		}
 	}
 	return rect{}, false
+}
+
+func (r *renderer) px(emu int) float64 {
+	return float64(emu) / emuPerPixel * r.scale
 }
 
 func xfrmRect(r *renderer, xfrm *ooxml.Node) (rect, bool) {
@@ -538,7 +615,7 @@ func (r *renderer) renderTextBody(b *strings.Builder, txBody *ooxml.Node, flex b
 			if v <= 0 {
 				v = def
 			}
-			return float64(v) / emuPerPixel * r.scale
+			return float64(v) / emuPerPixel * r.scale * r.textScale
 		}
 		style += fmt.Sprintf("padding:%.1fpx %.1fpx %.1fpx %.1fpx;",
 			inset("tIns", 45720), inset("rIns", 45720),
@@ -571,19 +648,19 @@ func (r *renderer) renderParagraph(b *strings.Builder, p *ooxml.Node) {
 			align = "left"
 		}
 		if v := ooxml.ParseInt(pPr.Attr("marL")); v > 0 {
-			style += fmt.Sprintf("margin-left:%.1fpx;", float64(v)/emuPerPixel*r.scale)
+			style += fmt.Sprintf("margin-left:%.1fpx;", float64(v)/emuPerPixel*r.scale*r.textScale)
 		}
 		if v := ooxml.ParseInt(pPr.Attr("indent")); v != 0 {
-			style += fmt.Sprintf("text-indent:%.1fpx;", float64(v)/emuPerPixel*r.scale)
+			style += fmt.Sprintf("text-indent:%.1fpx;", float64(v)/emuPerPixel*r.scale*r.textScale)
 		}
 		if sp := pPr.Child("spcBef"); sp != nil {
 			if pts := sp.Child("spcPts"); pts != nil {
-				style += fmt.Sprintf("margin-top:%.1fpx;", float64(ooxml.ParseInt(pts.Attr("val")))/100*96/72*r.scale)
+				style += fmt.Sprintf("margin-top:%.1fpx;", float64(ooxml.ParseInt(pts.Attr("val")))/100*96/72*r.scale*r.textScale)
 			}
 		}
 		if sp := pPr.Child("spcAft"); sp != nil {
 			if pts := sp.Child("spcPts"); pts != nil {
-				style += fmt.Sprintf("margin-bottom:%.1fpx;", float64(ooxml.ParseInt(pts.Attr("val")))/100*96/72*r.scale)
+				style += fmt.Sprintf("margin-bottom:%.1fpx;", float64(ooxml.ParseInt(pts.Attr("val")))/100*96/72*r.scale*r.textScale)
 			}
 		}
 		if align != "" {
@@ -603,7 +680,7 @@ func (r *renderer) renderParagraph(b *strings.Builder, p *ooxml.Node) {
 		}
 	}
 
-	def := runStyle{fontPx: 18 * 96 / 72 * r.scale}
+	def := runStyle{fontPx: 18 * 96 / 72 * r.scale * r.textScale}
 	if pPr != nil {
 		if dr := pPr.Child("defRPr"); dr != nil {
 			def = r.parseRunStyle(dr, def)
@@ -644,7 +721,7 @@ func (r *renderer) parseRunStyle(rPr *ooxml.Node, base runStyle) runStyle {
 		return out
 	}
 	if v := ooxml.ParseInt(rPr.Attr("sz")); v > 0 {
-		out.fontPx = float64(v) / 100 * 96 / 72 * r.scale
+		out.fontPx = float64(v) / 100 * 96 / 72 * r.scale * r.textScale
 	}
 	out.bold = rPr.Attr("b") == "1" || rPr.Attr("b") == "true"
 	out.italic = rPr.Attr("i") == "1" || rPr.Attr("i") == "true"

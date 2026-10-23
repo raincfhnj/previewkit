@@ -49,7 +49,7 @@ go get github.com/raincfhnj/previewkit
 其他项目引用：
 
 ```
-require github.com/raincfhnj/previewkit v0.5.0
+require github.com/raincfhnj/previewkit v0.6.0
 ```
 
 本地开发：
@@ -251,6 +251,7 @@ engine := previewkit.New(
 - 字号、字体颜色、高亮
 - 主题色（accent1/…/dk1/lt1 等）
 - 基础旋转、水平/垂直翻转
+- 组合形状坐标变换、文字缩放
 - 表格（含 `gridSpan` / `rowSpan`）
 - PNG/JPEG/GIF/WebP/BMP 图片（data URI）
 - 幻灯片背景色
@@ -260,7 +261,6 @@ engine := previewkit.New(
 - 图表、SmartArt
 - 动画、切换
 - 主题/母版的完整继承
-- 组合形状的坐标变换
 - 视频、音频
 - 备注页
 
