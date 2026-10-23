@@ -4,10 +4,12 @@ package xlsx
 
 import (
 	"archive/zip"
+	"encoding/base64"
 	"fmt"
 	"html"
 	"html/template"
 	"math"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +22,14 @@ type Options struct {
 	MaxRows     int
 	MaxCols     int
 	MaxXMLBytes int64
+
+	// MaxImageBytes limits the size of a single embedded image in bytes.
+	// Values <= 0 use 4 MiB. Unsupported formats are skipped.
+	MaxImageBytes int64
+
+	// MaxTotalImageBytes limits the combined size of all embedded images
+	// inlined into the HTML fragment. Values <= 0 use 20 MiB.
+	MaxTotalImageBytes int64
 }
 
 type sheetInfo struct {
@@ -48,9 +58,28 @@ type worksheet struct {
 	Merges           map[string]span
 	Skip             map[string]bool
 	Cols             map[int]float64
+	Images           []sheetImage
 	DefaultRowHeight float64
 	MaxCol           int
 	MaxRow           int
+}
+
+// sheetImage is an embedded picture positioned on a sheet.
+type sheetImage struct {
+	MimeType string
+	Data     []byte
+	X        float64
+	Y        float64
+	W        float64
+	H        float64
+}
+
+// relationship is an OOXML package relationship.
+type relationship struct {
+	ID       string
+	Type     string
+	Target   string
+	External bool
 }
 
 type span struct {
@@ -113,6 +142,12 @@ func Render(path string, opts Options) (template.HTML, error) {
 	}
 	if opts.MaxXMLBytes <= 0 {
 		opts.MaxXMLBytes = 32 << 20
+	}
+	if opts.MaxImageBytes <= 0 {
+		opts.MaxImageBytes = 4 << 20
+	}
+	if opts.MaxTotalImageBytes <= 0 {
+		opts.MaxTotalImageBytes = 20 << 20
 	}
 
 	zr, err := zip.OpenReader(path)
@@ -182,6 +217,7 @@ func Render(path string, opts Options) (template.HTML, error) {
 	}
 	b.WriteString(`</div>`)
 
+	totalImageBytes := int64(0)
 	for i, sheet := range sheets {
 		target := rels[sheet.RelID]
 		if target == "" {
@@ -193,16 +229,19 @@ func Render(path string, opts Options) (template.HTML, error) {
 		if err != nil {
 			// Some producers use a different relationship target. Try the
 			// conventional path before failing.
-			data, err = ooxml.ReadZipFileLimited(zr, fmt.Sprintf("xl/worksheets/sheet%d.xml", i+1), opts.MaxXMLBytes)
+			fallback := fmt.Sprintf("xl/worksheets/sheet%d.xml", i+1)
+			data, err = ooxml.ReadZipFileLimited(zr, fallback, opts.MaxXMLBytes)
 			if err != nil {
 				return "", fmt.Errorf("xlsx: read sheet %q: %w", sheet.Name, err)
 			}
+			sheetPath = fallback
 		}
 		root, err := ooxml.ParseXML(data)
 		if err != nil {
 			return "", fmt.Errorf("xlsx: parse sheet %q: %w", sheet.Name, err)
 		}
 		ws := parseSheet(root, sst)
+		ws.Images = parseSheetImages(zr, sheetPath, &ws, opts, &totalImageBytes)
 
 		style := "display:none"
 		if i == 0 {
@@ -210,8 +249,10 @@ func Render(path string, opts Options) (template.HTML, error) {
 		}
 		b.WriteString(`<div class="pk-sheet" data-pk-sheet="` +
 			html.EscapeString(sheet.Name) + `" style="` + style + `">`)
+		b.WriteString(`<div class="pk-sheet-canvas" style="position:relative">`)
 		renderWorksheet(&b, ws, st, opts)
-		b.WriteString(`</div>`)
+		renderSheetImages(&b, ws.Images)
+		b.WriteString(`</div></div>`)
 	}
 
 	b.WriteString(`</div>`)
@@ -239,6 +280,273 @@ func parseRelationships(root *ooxml.Node) map[string]string {
 		out[r.Attr("Id")] = r.Attr("Target")
 	}
 	return out
+}
+
+func parseRelationshipList(root *ooxml.Node) []relationship {
+	var out []relationship
+	for _, r := range root.Children("Relationship") {
+		out = append(out, relationship{
+			ID:       r.Attr("Id"),
+			Type:     r.Attr("Type"),
+			Target:   r.Attr("Target"),
+			External: strings.EqualFold(r.Attr("TargetMode"), "External"),
+		})
+	}
+	return out
+}
+
+// partRelsPath returns the relationship part path for an OOXML part, for
+// example "xl/worksheets/sheet1.xml" ->
+// "xl/worksheets/_rels/sheet1.xml.rels".
+func partRelsPath(part string) string {
+	return path.Join(path.Dir(part), "_rels", path.Base(part)+".rels")
+}
+
+const (
+	emuPerPx      = 9525.0
+	maxDrawingCol = 16384
+	maxDrawingRow = 16384
+)
+
+// parseSheetImages reads the drawing relationships of a worksheet and inlines
+// the referenced pictures. Unsupported or oversized images are skipped.
+func parseSheetImages(zr *zip.ReadCloser, sheetPath string, ws *worksheet, opts Options, used *int64) []sheetImage {
+	data, err := ooxml.ReadZipFileLimited(zr, partRelsPath(sheetPath), opts.MaxXMLBytes)
+	if err != nil {
+		return nil
+	}
+	root, err := ooxml.ParseXML(data)
+	if err != nil {
+		return nil
+	}
+
+	var out []sheetImage
+	for _, r := range parseRelationshipList(root) {
+		if r.External || r.Target == "" {
+			continue
+		}
+		if !strings.HasSuffix(strings.ToLower(r.Type), "/drawing") {
+			continue
+		}
+		drawingPath := ooxml.ResolveTarget(path.Dir(sheetPath), r.Target)
+		if drawingPath == "" {
+			continue
+		}
+		out = append(out, parseDrawingImages(zr, drawingPath, ws, opts, used)...)
+	}
+	return out
+}
+
+func parseDrawingImages(zr *zip.ReadCloser, drawingPath string, ws *worksheet, opts Options, used *int64) []sheetImage {
+	data, err := ooxml.ReadZipFileLimited(zr, drawingPath, opts.MaxXMLBytes)
+	if err != nil {
+		return nil
+	}
+	root, err := ooxml.ParseXML(data)
+	if err != nil {
+		return nil
+	}
+
+	rels := map[string]relationship{}
+	if relData, err := ooxml.ReadZipFileLimited(zr, partRelsPath(drawingPath), opts.MaxXMLBytes); err == nil {
+		if relRoot, err := ooxml.ParseXML(relData); err == nil {
+			for _, r := range parseRelationshipList(relRoot) {
+				rels[r.ID] = r
+			}
+		}
+	}
+
+	var out []sheetImage
+	for _, anchor := range root.Nodes {
+		x, y, w, h, ok := anchorBox(ws, anchor)
+		if !ok {
+			continue
+		}
+		pic := findDescendant(anchor, "pic")
+		if pic == nil {
+			continue
+		}
+		blip := findDescendant(pic, "blip")
+		if blip == nil {
+			continue
+		}
+		r, ok := rels[blip.Attr("embed")]
+		if !ok || r.External || r.Target == "" {
+			continue
+		}
+
+		mediaPath := ooxml.ResolveTarget(path.Dir(drawingPath), r.Target)
+		mimeType := imageMimeType(mediaPath)
+		if mimeType == "" {
+			continue
+		}
+
+		limit := opts.MaxImageBytes
+		if remaining := opts.MaxTotalImageBytes - *used; remaining < limit {
+			limit = remaining
+		}
+		if limit <= 0 {
+			continue
+		}
+		imgData, err := ooxml.ReadZipFileLimited(zr, mediaPath, limit)
+		if err != nil || len(imgData) == 0 {
+			continue
+		}
+		*used += int64(len(imgData))
+		out = append(out, sheetImage{
+			MimeType: mimeType,
+			Data:     imgData,
+			X:        x,
+			Y:        y,
+			W:        w,
+			H:        h,
+		})
+	}
+	return out
+}
+
+func imageMimeType(part string) string {
+	switch strings.ToLower(path.Ext(part)) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	default:
+		return ""
+	}
+}
+
+// anchorBox converts a drawing anchor into CSS pixel coordinates and size.
+func anchorBox(ws *worksheet, anchor *ooxml.Node) (x, y, w, h float64, ok bool) {
+	switch anchor.Name.Local {
+	case "twoCellAnchor":
+		from, to := anchor.Child("from"), anchor.Child("to")
+		if from == nil || to == nil {
+			return 0, 0, 0, 0, false
+		}
+		x, y = anchorPoint(ws, from)
+		x2, y2 := anchorPoint(ws, to)
+		w, h = x2-x, y2-y
+	case "oneCellAnchor":
+		from, ext := anchor.Child("from"), anchor.Child("ext")
+		if from == nil || ext == nil {
+			return 0, 0, 0, 0, false
+		}
+		x, y = anchorPoint(ws, from)
+		w = ooxml.ParseFloat(ext.Attr("cx")) / emuPerPx
+		h = ooxml.ParseFloat(ext.Attr("cy")) / emuPerPx
+	case "absoluteAnchor":
+		ext := anchor.Child("ext")
+		if ext == nil {
+			return 0, 0, 0, 0, false
+		}
+		if pos := anchor.Child("pos"); pos != nil {
+			x = ooxml.ParseFloat(pos.Attr("x")) / emuPerPx
+			y = ooxml.ParseFloat(pos.Attr("y")) / emuPerPx
+		}
+		w = ooxml.ParseFloat(ext.Attr("cx")) / emuPerPx
+		h = ooxml.ParseFloat(ext.Attr("cy")) / emuPerPx
+	default:
+		return 0, 0, 0, 0, false
+	}
+	if !validPixels(x) || !validPixels(y) || !validPixels(w) || !validPixels(h) || w <= 0 || h <= 0 {
+		return 0, 0, 0, 0, false
+	}
+	return x, y, w, h, true
+}
+
+func validPixels(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+// anchorPoint computes the pixel offset of a <xdr:from>/<xdr:to> marker.
+// Column and row indices are zero-based and offsets are EMU.
+func anchorPoint(ws *worksheet, n *ooxml.Node) (x, y float64) {
+	col := ooxml.ParseInt(n.Child("col").TextContent())
+	row := ooxml.ParseInt(n.Child("row").TextContent())
+	colOff := ooxml.ParseFloat(n.Child("colOff").TextContent())
+	rowOff := ooxml.ParseFloat(n.Child("rowOff").TextContent())
+	return colOffsetPx(ws, col) + colOff/emuPerPx,
+		rowOffsetPx(ws, row) + rowOff/emuPerPx
+}
+
+func colOffsetPx(ws *worksheet, col int) float64 {
+	if col < 0 {
+		col = 0
+	}
+	if col > maxDrawingCol {
+		col = maxDrawingCol
+	}
+	var x float64
+	for i := 0; i < col; i++ {
+		x += colWidthPx(ws, i)
+	}
+	return x
+}
+
+func colWidthPx(ws *worksheet, col int) float64 {
+	width := 8.43
+	if w, ok := ws.Cols[col+1]; ok && w > 0 {
+		width = w
+	}
+	return math.Round(width*7 + 5)
+}
+
+func rowOffsetPx(ws *worksheet, row int) float64 {
+	if row < 0 {
+		row = 0
+	}
+	if row > maxDrawingRow {
+		row = maxDrawingRow
+	}
+
+	heights := make(map[int]float64, len(ws.Rows))
+	for _, r := range ws.Rows {
+		height := r.Height
+		if height <= 0 {
+			height = defaultRowHeight(ws)
+		}
+		heights[r.Num] = math.Round(height * 96 / 72)
+	}
+	fallback := math.Round(defaultRowHeight(ws) * 96 / 72)
+
+	var y float64
+	for i := 1; i <= row; i++ {
+		if height, ok := heights[i]; ok {
+			y += height
+		} else {
+			y += fallback
+		}
+	}
+	return y
+}
+
+func defaultRowHeight(ws *worksheet) float64 {
+	if ws.DefaultRowHeight > 0 {
+		return ws.DefaultRowHeight
+	}
+	return 15
+}
+
+func findDescendant(n *ooxml.Node, local string) *ooxml.Node {
+	if n == nil {
+		return nil
+	}
+	if n.Name.Local == local {
+		return n
+	}
+	for _, c := range n.Nodes {
+		if got := findDescendant(c, local); got != nil {
+			return got
+		}
+	}
+	return nil
 }
 
 func parseSharedStrings(root *ooxml.Node) []string {
@@ -612,6 +920,15 @@ func renderWorksheet(b *strings.Builder, ws worksheet, st styles, opts Options) 
 	}
 
 	b.WriteString(`</tbody></table>`)
+}
+
+func renderSheetImages(b *strings.Builder, images []sheetImage) {
+	for _, img := range images {
+		fmt.Fprintf(b, `<img class="pk-sheet-img" alt="" src="data:%s;base64,%s" style="position:absolute;left:%.0fpx;top:%.0fpx;width:%.0fpx;height:%.0fpx">`,
+			img.MimeType,
+			base64.StdEncoding.EncodeToString(img.Data),
+			img.X, img.Y, img.W, img.H)
+	}
 }
 
 func cellText(c cell, st styles) string {
