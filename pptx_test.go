@@ -42,6 +42,25 @@ func TestRenderPPTX(t *testing.T) {
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
 </Relationships>`,
 		"ppt/media/image1.png": "\x89PNG\r\n\x1a\npreviewkit",
+		"ppt/theme/theme1.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <a:themeElements>
+    <a:clrScheme name="Test">
+      <a:dk1><a:sysClr val="windowText" lastClr="111111"/></a:dk1>
+      <a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
+      <a:dk2><a:srgbClr val="222222"/></a:dk2>
+      <a:lt2><a:srgbClr val="EEEEEE"/></a:lt2>
+      <a:accent1><a:srgbClr val="FF00FF"/></a:accent1>
+      <a:accent2><a:srgbClr val="00FF00"/></a:accent2>
+      <a:accent3><a:srgbClr val="0000FF"/></a:accent3>
+      <a:accent4><a:srgbClr val="FFFF00"/></a:accent4>
+      <a:accent5><a:srgbClr val="00FFFF"/></a:accent5>
+      <a:accent6><a:srgbClr val="FF0000"/></a:accent6>
+      <a:hlink><a:srgbClr val="0000EE"/></a:hlink>
+      <a:folHlink><a:srgbClr val="551A8B"/></a:folHlink>
+    </a:clrScheme>
+  </a:themeElements>
+</a:theme>`,
 		"ppt/slides/slide1.xml": `<?xml version="1.0" encoding="UTF-8"?>
 <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -53,7 +72,7 @@ func TestRenderPPTX(t *testing.T) {
         <p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
         <p:spPr><a:xfrm><a:off x="609600" y="457200"/><a:ext cx="10972800" cy="1371600"/></a:xfrm></p:spPr>
         <p:txBody><a:bodyPr/><a:p>
-          <a:r><a:rPr sz="3200" b="1"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:rPr><a:t>标题</a:t></a:r>
+          <a:r><a:rPr sz="3200" b="1"><a:solidFill><a:schemeClr val="accent1"/></a:solidFill></a:rPr><a:t>标题</a:t></a:r>
         </a:p></p:txBody>
       </p:sp>
       <p:sp>
@@ -111,6 +130,7 @@ func TestRenderPPTX(t *testing.T) {
 		"单元格",
 		"第二页",
 		"font-weight:700",
+		"color:#FF00FF",
 		"width:960px",
 		`class="pk-pptx-img"`,
 		"data:image/png;base64,",

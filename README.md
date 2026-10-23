@@ -27,9 +27,9 @@
 |---|---|
 | 零第三方核心依赖 | 只用 Go 标准库，无 CGO、无派生仓库、无 AGPL/GPL |
 | 自研 Markdown | 安全子集，原始 HTML 一律转义，链接协议白名单 |
-| 自研 XLSX | ZIP + XML 解析，支持共享字符串、样式、合并、列宽、行高 |
+| 自研 XLSX | ZIP + XML 解析，支持共享字符串、样式、主题色、合并、列宽、行高 |
 | 自研 DOCX | ZIP + XML 解析，支持段落、标题、表格、列表、超链接、内嵌图片 |
-| 自研 PPTX | ZIP + XML 解析，支持文本框、形状、表格、图片、背景、占位符布局 |
+| 自研 PPTX | ZIP + XML 解析，支持文本框、形状、表格、图片、背景、占位符布局、主题色、旋转 |
 | 自研文本编码 | UTF-8 / UTF-16 / GBK，内置紧凑 GBK 映射表 |
 | 自研 singleflight | 同一个 Office 文件并发预览只转换一次 |
 | Range 友好 | 返回文件路径，配合 `http.ServeContent` 支持 PDF 分页/视频拖动 |
@@ -49,7 +49,7 @@ go get github.com/raincfhnj/previewkit
 其他项目引用：
 
 ```
-require github.com/raincfhnj/previewkit v0.3.0
+require github.com/raincfhnj/previewkit v0.4.0
 ```
 
 本地开发：
@@ -213,6 +213,7 @@ PDF.js 是 Apache-2.0，可商用；它不是本库依赖，需要你自己放�
 - 列宽、行高
 - 粗体、斜体、下划线、删除线
 - 字号、字体颜色、背景填充色
+- 主题色（theme index）
 - 水平/垂直对齐、自动换行
 
 明确不支持：
@@ -246,6 +247,8 @@ engine := previewkit.New(
 - 段落对齐、项目符号
 - 粗体、斜体、下划线、删除线
 - 字号、字体颜色、高亮
+- 主题色（accent1/…/dk1/lt1 等）
+- 基础旋转、水平/垂直翻转
 - 表格（含 `gridSpan` / `rowSpan`）
 - PNG/JPEG/GIF/WebP/BMP 图片（data URI）
 - 幻灯片背景色

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.0
+
+- Added OOXML theme color resolution for PPTX and XLSX:
+  - PPTX `schemeClr` (accent1, dk1, lt1, ...).
+  - XLSX `theme` indices for fonts and fills.
+- Added PPTX theme fixture coverage.
+- Added fuzz tests for Markdown, XML parsing, and text decoding.
+- CI now runs tests with `-shuffle=on`.
+
 ## v0.3.0
 
 - Added DOCX vertical merge (`vMerge`) rowspan support.

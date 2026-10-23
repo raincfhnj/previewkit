@@ -57,6 +57,7 @@ type renderer struct {
 	imageTotal  int
 	curRels     map[string]relInfo
 	layoutCache map[string]map[string]rect
+	theme       map[string]string
 }
 
 type slideRef struct {
@@ -127,6 +128,7 @@ func Render(filePath string, opts Options) (template.HTML, error) {
 		scale:       scale,
 		slideH:      int(math.Round(float64(slideCY) / emuPerPixel * scale)),
 		layoutCache: map[string]map[string]rect{},
+		theme:       ooxml.ReadThemeColors(zr, "ppt/theme/", opts.MaxXMLBytes),
 	}
 
 	var b strings.Builder
@@ -193,7 +195,7 @@ func (r *renderer) renderSlide(b *strings.Builder, index int, slidePath string) 
 	r.curRels = rels
 	defer func() { r.curRels = prevRels }()
 
-	bg := slideBackground(root)
+	bg := slideBackground(root, r.theme)
 	fmt.Fprintf(b, `<section class="pk-pptx-slide" data-slide="%d" style="width:%dpx;height:%dpx;background:%s">`,
 		index+1, r.opts.TargetWidth, r.slideH, bg)
 	fmt.Fprintf(b, `<div class="pk-pptx-page">%d</div>`, index+1)
@@ -207,7 +209,7 @@ func (r *renderer) renderSlide(b *strings.Builder, index int, slidePath string) 
 	return nil
 }
 
-func slideBackground(root *ooxml.Node) string {
+func slideBackground(root *ooxml.Node, theme map[string]string) string {
 	cSld := root.Child("cSld")
 	if cSld == nil {
 		return "#FFFFFF"
@@ -220,18 +222,27 @@ func slideBackground(root *ooxml.Node) string {
 	if bgPr == nil {
 		return "#FFFFFF"
 	}
-	if c := solidColor(bgPr); c != "" {
+	if c := solidColor(bgPr, theme); c != "" {
 		return c
 	}
 	return "#FFFFFF"
 }
 
-func solidColor(n *ooxml.Node) string {
+func solidColor(n *ooxml.Node, theme map[string]string) string {
 	sf := n.Child("solidFill")
 	if sf == nil {
 		return ""
 	}
 	if c := sf.Child("srgbClr"); c != nil {
+		return ooxml.HexColor(c.Attr("val"))
+	}
+	if c := sf.Child("schemeClr"); c != nil {
+		return theme[c.Attr("val")]
+	}
+	if c := sf.Child("sysClr"); c != nil {
+		if v := ooxml.HexColor(c.Attr("lastClr")); v != "" {
+			return v
+		}
 		return ooxml.HexColor(c.Attr("val"))
 	}
 	return ""
@@ -260,11 +271,11 @@ func (r *renderer) renderShape(b *strings.Builder, n *ooxml.Node, layout map[str
 	}
 
 	style := r.shapeStyle(rc)
-	if fill := solidColor(spPr); fill != "" {
+	if fill := solidColor(spPr, r.theme); fill != "" {
 		style += "background:" + fill + ";"
 	}
 	if ln := spPr.Child("ln"); ln != nil {
-		if c := solidColor(ln); c != "" {
+		if c := solidColor(ln, r.theme); c != "" {
 			width := 1.0
 			if w := ooxml.ParseInt(ln.Attr("w")); w > 0 {
 				width = float64(w) / emuPerPixel * r.scale
@@ -340,7 +351,7 @@ func (r *renderer) renderGraphicFrame(b *strings.Builder, n *ooxml.Node) {
 				fmt.Fprintf(b, ` rowspan="%d"`, rowspan)
 			}
 			if tcPr := tc.Child("tcPr"); tcPr != nil {
-				if c := solidColor(tcPr); c != "" {
+				if c := solidColor(tcPr, r.theme); c != "" {
 					b.WriteString(` style="background:` + c + `"`)
 				}
 			}
@@ -643,12 +654,14 @@ func (r *renderer) parseRunStyle(rPr *ooxml.Node, base runStyle) runStyle {
 	if s := rPr.Attr("strike"); s != "" && s != "noStrike" {
 		out.strike = true
 	}
-	if c := solidColor(rPr); c != "" {
+	if c := solidColor(rPr, r.theme); c != "" {
 		out.color = c
 	}
 	if hl := rPr.Child("highlight"); hl != nil {
 		if c := hl.Child("srgbClr"); c != nil {
 			out.highlight = ooxml.HexColor(c.Attr("val"))
+		} else if c := hl.Child("schemeClr"); c != nil {
+			out.highlight = r.theme[c.Attr("val")]
 		}
 	}
 	if latin := rPr.Child("latin"); latin != nil {

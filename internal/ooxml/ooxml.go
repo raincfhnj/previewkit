@@ -145,6 +145,81 @@ func (n *Node) appendText(b *strings.Builder) {
 // ErrEntryTooLarge is returned when a ZIP entry exceeds a configured limit.
 var ErrEntryTooLarge = errors.New("ooxml: zip entry too large")
 
+// ReadThemeColors reads an OOXML theme color scheme under prefix (for example
+// "xl/theme/" or "ppt/theme/"). The returned map contains both scheme names
+// ("accent1", "dk1", ...) and zero-based indices ("0", "1", ...).
+func ReadThemeColors(zr *zip.ReadCloser, prefix string, limit int64) map[string]string {
+	out := map[string]string{}
+
+	themePath := ""
+	for _, f := range zr.File {
+		lower := strings.ToLower(f.Name)
+		if strings.HasPrefix(lower, strings.ToLower(prefix)) && strings.HasSuffix(lower, ".xml") {
+			themePath = f.Name
+			break
+		}
+	}
+	if themePath == "" {
+		return out
+	}
+
+	data, err := ReadZipFileLimited(zr, themePath, limit)
+	if err != nil {
+		return out
+	}
+	root, err := ParseXML(data)
+	if err != nil {
+		return out
+	}
+	cs := findFirst(root, "clrScheme")
+	if cs == nil {
+		return out
+	}
+
+	for i, n := range cs.Nodes {
+		color := ""
+		if c := n.Child("srgbClr"); c != nil {
+			color = HexColor(c.Attr("val"))
+		}
+		if color == "" {
+			if c := n.Child("sysClr"); c != nil {
+				color = HexColor(c.Attr("lastClr"))
+				if color == "" {
+					color = HexColor(c.Attr("val"))
+				}
+			}
+		}
+		if color == "" {
+			continue
+		}
+		out[n.Name.Local] = color
+		out[strconv.Itoa(i)] = color
+	}
+
+	aliases := map[string]string{"dk1": "tx1", "lt1": "bg1", "dk2": "tx2", "lt2": "bg2"}
+	for from, to := range aliases {
+		if color := out[from]; color != "" {
+			out[to] = color
+		}
+	}
+	return out
+}
+
+func findFirst(n *Node, local string) *Node {
+	if n == nil {
+		return nil
+	}
+	if n.Name.Local == local {
+		return n
+	}
+	for _, c := range n.Nodes {
+		if got := findFirst(c, local); got != nil {
+			return got
+		}
+	}
+	return nil
+}
+
 // ReadZipFile reads a ZIP entry by path, tolerating leading slashes and case
 // differences.
 func ReadZipFile(zr *zip.ReadCloser, name string) ([]byte, error) {

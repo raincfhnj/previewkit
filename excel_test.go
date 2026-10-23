@@ -45,7 +45,7 @@ func TestRenderXLSX(t *testing.T) {
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <fonts count="2">
     <font><sz val="11"/><name val="Calibri"/></font>
-    <font><b/><sz val="11"/><color rgb="FFFF0000"/><name val="Calibri"/></font>
+    <font><b/><sz val="11"/><color theme="4"/><name val="Calibri"/></font>
   </fonts>
   <fills count="3">
     <fill><patternFill patternType="none"/></fill>
@@ -57,6 +57,25 @@ func TestRenderXLSX(t *testing.T) {
     <xf numFmtId="0" fontId="1" fillId="2" applyFont="1" applyFill="1"/>
   </cellXfs>
 </styleSheet>`,
+		"xl/theme/theme1.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <a:themeElements>
+    <a:clrScheme name="Test">
+      <a:dk1><a:srgbClr val="111111"/></a:dk1>
+      <a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>
+      <a:dk2><a:srgbClr val="222222"/></a:dk2>
+      <a:lt2><a:srgbClr val="EEEEEE"/></a:lt2>
+      <a:accent1><a:srgbClr val="FF00FF"/></a:accent1>
+      <a:accent2><a:srgbClr val="00FF00"/></a:accent2>
+      <a:accent3><a:srgbClr val="0000FF"/></a:accent3>
+      <a:accent4><a:srgbClr val="FFFF00"/></a:accent4>
+      <a:accent5><a:srgbClr val="00FFFF"/></a:accent5>
+      <a:accent6><a:srgbClr val="FF0000"/></a:accent6>
+      <a:hlink><a:srgbClr val="0000EE"/></a:hlink>
+      <a:folHlink><a:srgbClr val="551A8B"/></a:folHlink>
+    </a:clrScheme>
+  </a:themeElements>
+</a:theme>`,
 		"xl/worksheets/sheet1.xml": `<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <cols><col min="1" max="1" width="15" customWidth="1"/></cols>
@@ -96,6 +115,7 @@ func TestRenderXLSX(t *testing.T) {
 		"第二页",
 		`colspan="2"`,
 		"font-weight:600",
+		"color:#FF00FF",
 		"background-color:#FFFF00",
 		`data-pk-sheet="Sheet1"`,
 		`width:110px`,

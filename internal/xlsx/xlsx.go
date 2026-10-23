@@ -146,10 +146,12 @@ func Render(path string, opts Options) (template.HTML, error) {
 		}
 	}
 
+	theme := ooxml.ReadThemeColors(zr, "xl/theme/", opts.MaxXMLBytes)
+
 	st := styles{NumFmts: map[int]string{}}
 	if data, err := ooxml.ReadZipFileLimited(zr, stylesPath, opts.MaxXMLBytes); err == nil {
 		if root, err := ooxml.ParseXML(data); err == nil {
-			st = parseStyles(root)
+			st = parseStyles(root, theme)
 		}
 	}
 
@@ -249,7 +251,7 @@ func textFromNode(n *ooxml.Node) string {
 	return b.String()
 }
 
-func parseStyles(root *ooxml.Node) styles {
+func parseStyles(root *ooxml.Node, theme map[string]string) styles {
 	st := styles{NumFmts: map[int]string{}}
 
 	if nf := root.Child("numFmts"); nf != nil {
@@ -272,7 +274,7 @@ func parseStyles(root *ooxml.Node) styles {
 				fs.Size = ooxml.ParseFloat(sz.Attr("val"))
 			}
 			if c := f.Child("color"); c != nil {
-				fs.Color = ooxml.HexColor(c.Attr("rgb"))
+				fs.Color = colorFromNode(c, theme)
 			}
 			st.Fonts = append(st.Fonts, fs)
 		}
@@ -284,7 +286,7 @@ func parseStyles(root *ooxml.Node) styles {
 			if pf := f.Child("patternFill"); pf != nil {
 				if pf.Attr("patternType") == "solid" {
 					if c := pf.Child("fgColor"); c != nil {
-						fs.Color = ooxml.HexColor(c.Attr("rgb"))
+						fs.Color = colorFromNode(c, theme)
 					}
 				}
 			}
@@ -311,6 +313,25 @@ func parseStyles(root *ooxml.Node) styles {
 	}
 
 	return st
+}
+
+func colorFromNode(n *ooxml.Node, theme map[string]string) string {
+	if n == nil {
+		return ""
+	}
+	if color := ooxml.HexColor(n.Attr("rgb")); color != "" {
+		return color
+	}
+	if idx := n.Attr("theme"); idx != "" {
+		return theme[idx]
+	}
+	if c := n.Child("srgbClr"); c != nil {
+		return ooxml.HexColor(c.Attr("val"))
+	}
+	if c := n.Child("schemeClr"); c != nil {
+		return theme[c.Attr("val")]
+	}
+	return ""
 }
 
 func onOff(n *ooxml.Node) bool {
