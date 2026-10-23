@@ -14,6 +14,7 @@ import (
 	"html"
 	"html/template"
 	"net/url"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,6 +28,8 @@ type Options struct {
 	MaxTotalImageBytes int
 	MaxXMLBytes        int64
 }
+
+const relNS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 type rel struct {
 	Target   string
@@ -141,11 +144,123 @@ func Render(path string, opts Options) (template.HTML, error) {
 		return "", fmt.Errorf("docx: document has no body")
 	}
 
+	sectPr := findLast(body, "sectPr")
+
 	var b strings.Builder
 	b.WriteString(`<div class="pk-docx">`)
+
+	if sectPr != nil {
+		if target := partTarget(rels, sectPr, "headerReference"); target != "" {
+			partPath := ooxml.ResolveTarget("word", target)
+			if ooxml.HasZipFile(zr, partPath) {
+				b.WriteString(`<div class="pk-docx-header">`)
+				r.renderPart(&b, partPath)
+				b.WriteString(`</div>`)
+			}
+		}
+	}
+
 	r.renderBlocks(&b, body)
+
+	if sectPr != nil {
+		if target := partTarget(rels, sectPr, "footerReference"); target != "" {
+			partPath := ooxml.ResolveTarget("word", target)
+			if ooxml.HasZipFile(zr, partPath) {
+				b.WriteString(`<div class="pk-docx-footer">`)
+				r.renderPart(&b, partPath)
+				b.WriteString(`</div>`)
+			}
+		}
+	}
+
 	b.WriteString(`</div>`)
 	return template.HTML(b.String()), nil
+}
+
+func findLast(n *ooxml.Node, local string) *ooxml.Node {
+	if n == nil {
+		return nil
+	}
+	for i := len(n.Nodes) - 1; i >= 0; i-- {
+		if n.Nodes[i].Name.Local == local {
+			return n.Nodes[i]
+		}
+		if got := findLast(n.Nodes[i], local); got != nil {
+			return got
+		}
+	}
+	return nil
+}
+
+func partTarget(rels map[string]rel, sectPr *ooxml.Node, local string) string {
+	refs := sectPr.Children(local)
+	for _, ref := range refs {
+		typ := ref.Attr("type")
+		if typ == "" || typ == "default" {
+			if rid := relID(ref); rid != "" {
+				return rels[rid].Target
+			}
+		}
+	}
+	if len(refs) > 0 {
+		if rid := relID(refs[0]); rid != "" {
+			return rels[rid].Target
+		}
+	}
+	return ""
+}
+
+func relID(n *ooxml.Node) string {
+	if id := n.AttrNS(relNS, "id"); id != "" {
+		return id
+	}
+	for _, a := range n.Attrs {
+		if a.Name.Local == "id" && strings.HasPrefix(a.Value, "rId") {
+			return a.Value
+		}
+	}
+	return ""
+}
+
+func relsPath(part string) string {
+	return path.Join(path.Dir(part), "_rels", path.Base(part)+".rels")
+}
+
+func readPartRelationships(zr *zip.ReadCloser, part string, limit int64) map[string]rel {
+	data, err := ooxml.ReadZipFileLimited(zr, relsPath(part), limit)
+	if err != nil {
+		return nil
+	}
+	root, err := ooxml.ParseXML(data)
+	if err != nil {
+		return nil
+	}
+	return parseRelationships(root)
+}
+
+func (r *renderer) renderPart(b *strings.Builder, partPath string) {
+	data, err := ooxml.ReadZipFileLimited(r.zr, partPath, r.opts.MaxXMLBytes)
+	if err != nil {
+		return
+	}
+	root, err := ooxml.ParseXML(data)
+	if err != nil {
+		return
+	}
+
+	old := r.rels
+	if partRels := readPartRelationships(r.zr, partPath, r.opts.MaxXMLBytes); len(partRels) > 0 {
+		merged := make(map[string]rel, len(old)+len(partRels))
+		for k, v := range old {
+			merged[k] = v
+		}
+		for k, v := range partRels {
+			merged[k] = v
+		}
+		r.rels = merged
+	}
+	r.renderBlocks(b, root)
+	r.rels = old
 }
 
 func parseRelationships(root *ooxml.Node) map[string]rel {

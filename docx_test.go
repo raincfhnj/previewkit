@@ -18,7 +18,18 @@ func TestRenderDOCX(t *testing.T) {
   <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
 </Types>`,
 		"word/_rels/document.xml.rels": `<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`,
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+  <Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>
+</Relationships>`,
+		"word/header1.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:t>页眉</w:t></w:r></w:p>
+</w:hdr>`,
+		"word/footer1.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:t>页脚</w:t></w:r></w:p>
+</w:ftr>`,
 		"word/styles.xml": `<?xml version="1.0" encoding="UTF-8"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:style w:type="paragraph" w:styleId="Heading1">
@@ -52,7 +63,8 @@ func TestRenderDOCX(t *testing.T) {
   <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
 </w:numbering>`,
 		"word/document.xml": `<?xml version="1.0" encoding="UTF-8"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <w:body>
     <w:p>
       <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
@@ -86,6 +98,10 @@ func TestRenderDOCX(t *testing.T) {
         <w:tc><w:p><w:r><w:t>右2</w:t></w:r></w:p></w:tc>
       </w:tr>
     </w:tbl>
+    <w:sectPr>
+      <w:headerReference w:type="default" r:id="rIdHeader"/>
+      <w:footerReference w:type="default" r:id="rIdFooter"/>
+    </w:sectPr>
   </w:body>
 </w:document>`,
 	})
@@ -109,6 +125,10 @@ func TestRenderDOCX(t *testing.T) {
 		"右1",
 		"右2",
 		`rowspan="2"`,
+		`class="pk-docx-header"`,
+		"页眉",
+		`class="pk-docx-footer"`,
+		"页脚",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("rendered HTML does not contain %q", want)

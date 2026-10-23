@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.0
+
+- DOCX: render default section headers and footers.
+- DOCX: resolve header/footer relationships, including part-local rels.
+- Added header/footer fixture coverage.
+
 ## v0.6.0
 
 - PPTX: recursive group shape coordinate transforms.
