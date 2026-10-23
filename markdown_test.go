@@ -23,6 +23,23 @@ func TestRenderMarkdownSanitizesScript(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdownNestedList(t *testing.T) {
+	src := []byte("- a\n  - b\n  - c\n- d\n")
+	out, err := RenderMarkdown(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if strings.Count(s, "<ul>") != 2 {
+		t.Fatalf("expected two nested lists, got %s", s)
+	}
+	for _, want := range []string{"<li>a", "<li>b</li>", "<li>c</li>", "<li>d</li>"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in %s", want, s)
+		}
+	}
+}
+
 func TestRenderMarkdownInline(t *testing.T) {
 	src := []byte("**bold** *em* __strong__ ~~del~~ `code` [link](https://example.com)\n\n<img src=x onerror=alert(1)>\n\n[bad](javascript:alert(1))")
 	out, err := RenderMarkdown(src)

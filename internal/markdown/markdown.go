@@ -233,27 +233,30 @@ func renderList(b *strings.Builder, lines []string, i int, ordered bool) int {
 		}
 		i++
 
-		item := []string{content}
+		var nested []string
 		for i < len(lines) {
 			if strings.TrimSpace(lines[i]) == "" {
 				break
 			}
-			if _, _, _, ok := listMarker(lines[i], ordered); ok {
+
+			nextIndent, _, _, isOrdered := listMarker(lines[i], true)
+			if !isOrdered {
+				nextIndent, _, _, isOrdered = listMarker(lines[i], false)
+			}
+			if isOrdered {
+				if nextIndent <= baseIndent {
+					break
+				}
+			} else if leadingSpaces(lines[i]) <= baseIndent {
 				break
 			}
-			if _, _, _, ok := listMarker(lines[i], !ordered); ok {
-				break
-			}
-			if leadingSpaces(lines[i]) <= baseIndent {
-				break
-			}
-			item = append(item, strings.TrimSpace(lines[i]))
+
+			nested = append(nested, lines[i])
 			i++
 		}
 
 		b.WriteString("<li>")
-		text := strings.Join(item, "\n")
-		if checked, rest, ok := taskItem(text); ok {
+		if checked, rest, ok := taskItem(content); ok {
 			b.WriteString(`<input type="checkbox" disabled`)
 			if checked {
 				b.WriteString(` checked`)
@@ -261,7 +264,11 @@ func renderList(b *strings.Builder, lines []string, i int, ordered bool) int {
 			b.WriteString(`> `)
 			b.WriteString(inline(rest))
 		} else {
-			b.WriteString(inline(text))
+			b.WriteString(inline(content))
+		}
+		if len(nested) > 0 {
+			b.WriteString("\n")
+			renderBlocks(b, nested)
 		}
 		b.WriteString("</li>\n")
 	}

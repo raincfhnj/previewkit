@@ -70,6 +70,7 @@ type renderer struct {
 
 	listCounters map[string]int
 	imageTotal   int
+	theme        map[string]string
 }
 
 // Render converts a DOCX document to an HTML fragment.
@@ -106,10 +107,12 @@ func Render(path string, opts Options) (template.HTML, error) {
 		}
 	}
 
+	theme := ooxml.ReadThemeColors(zr, "word/theme/", opts.MaxXMLBytes)
+
 	var st *docStyles
 	if data, err := ooxml.ReadZipFileLimited(zr, "word/styles.xml", opts.MaxXMLBytes); err == nil {
 		if n, err := ooxml.ParseXML(data); err == nil {
-			st = parseStyles(n)
+			st = parseStyles(n, theme)
 		}
 	}
 	if st == nil {
@@ -130,6 +133,7 @@ func Render(path string, opts Options) (template.HTML, error) {
 		zr:           zr,
 		opts:         opts,
 		listCounters: map[string]int{},
+		theme:        theme,
 	}
 
 	body := root.Child("body")
@@ -155,7 +159,7 @@ func parseRelationships(root *ooxml.Node) map[string]rel {
 	return out
 }
 
-func parseStyles(root *ooxml.Node) *docStyles {
+func parseStyles(root *ooxml.Node, theme map[string]string) *docStyles {
 	st := &docStyles{
 		raw:   map[string]styleInfo{},
 		base:  map[string]string{},
@@ -185,7 +189,7 @@ func parseStyles(root *ooxml.Node) *docStyles {
 		}
 
 		if rPr := n.Child("rPr"); rPr != nil {
-			info.Char = parseCharProps(rPr)
+			info.Char = parseCharProps(rPr, theme)
 		}
 		if pPr := n.Child("pPr"); pPr != nil {
 			if jc := pPr.Child("jc"); jc != nil {
@@ -262,7 +266,7 @@ func mergeChar(base, over charStyle) charStyle {
 	return out
 }
 
-func parseCharProps(rPr *ooxml.Node) charStyle {
+func parseCharProps(rPr *ooxml.Node, theme map[string]string) charStyle {
 	var c charStyle
 	c.Bold = onOff(rPr.Child("b"))
 	c.Italic = onOff(rPr.Child("i"))
@@ -275,15 +279,132 @@ func parseCharProps(rPr *ooxml.Node) charStyle {
 		c.Size = ooxml.ParseFloat(sz.Attr("val")) / 2
 	}
 	if color := rPr.Child("color"); color != nil {
-		c.Color = ooxml.HexColor(color.Attr("val"))
+		c.Color = themeColor(color, theme)
 	}
 	if hl := rPr.Child("highlight"); hl != nil {
 		c.Highlight = highlightColor(hl.Attr("val"))
 	}
 	if shd := rPr.Child("shd"); shd != nil && c.Highlight == "" {
 		c.Highlight = ooxml.HexColor(shd.Attr("fill"))
+		if c.Highlight == "" {
+			c.Highlight = themeColorByName(
+				shd.Attr("themeFill"),
+				shd.Attr("themeFillTint"),
+				shd.Attr("themeFillShade"),
+				theme,
+			)
+		}
 	}
 	return c
+}
+
+func themeColor(n *ooxml.Node, theme map[string]string) string {
+	if c := ooxml.HexColor(n.Attr("val")); c != "" {
+		return c
+	}
+	return themeColorByName(n.Attr("themeColor"), n.Attr("themeTint"), n.Attr("themeShade"), theme)
+}
+
+func themeColorByName(name, tint, shade string, theme map[string]string) string {
+	if name == "" {
+		return ""
+	}
+	color := theme[themeKey(name)]
+	if color == "" {
+		return ""
+	}
+	if shade != "" {
+		color = applyShade(color, shade)
+	}
+	if tint != "" {
+		color = applyTint(color, tint)
+	}
+	return color
+}
+
+func themeKey(name string) string {
+	switch name {
+	case "dark1", "text1":
+		return "dk1"
+	case "light1", "background1":
+		return "lt1"
+	case "dark2", "text2":
+		return "dk2"
+	case "light2", "background2":
+		return "lt2"
+	case "hyperlink":
+		return "hlink"
+	case "followedHyperlink":
+		return "folHlink"
+	default:
+		return name
+	}
+}
+
+func applyShade(color, value string) string {
+	r, g, b, ok := parseRGB(color)
+	factor, ok2 := parseByte(value)
+	if !ok || !ok2 {
+		return color
+	}
+	f := float64(factor) / 255
+	return formatRGB(int(float64(r)*f+0.5), int(float64(g)*f+0.5), int(float64(b)*f+0.5))
+}
+
+func applyTint(color, value string) string {
+	r, g, b, ok := parseRGB(color)
+	tint, ok2 := parseByte(value)
+	if !ok || !ok2 {
+		return color
+	}
+	t := float64(tint) / 255
+	return formatRGB(
+		int(float64(r)+(255-float64(r))*t+0.5),
+		int(float64(g)+(255-float64(g))*t+0.5),
+		int(float64(b)+(255-float64(b))*t+0.5),
+	)
+}
+
+func parseRGB(color string) (int, int, int, bool) {
+	color = strings.TrimPrefix(color, "#")
+	if len(color) != 6 {
+		return 0, 0, 0, false
+	}
+	v, err := strconv.ParseUint(color, 16, 32)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	return int(v>>16) & 0xFF, int(v>>8) & 0xFF, int(v) & 0xFF, true
+}
+
+func parseByte(value string) (int, bool) {
+	v, err := strconv.ParseUint(strings.TrimSpace(value), 16, 8)
+	if err != nil {
+		return 0, false
+	}
+	return int(v), true
+}
+
+func formatRGB(r, g, b int) string {
+	if r < 0 {
+		r = 0
+	}
+	if g < 0 {
+		g = 0
+	}
+	if b < 0 {
+		b = 0
+	}
+	if r > 255 {
+		r = 255
+	}
+	if g > 255 {
+		g = 255
+	}
+	if b > 255 {
+		b = 255
+	}
+	return fmt.Sprintf("#%02X%02X%02X", r, g, b)
 }
 
 func onOff(n *ooxml.Node) bool {
@@ -501,7 +622,7 @@ func (r *renderer) renderRun(n *ooxml.Node, base charStyle) string {
 		if rs := rPr.Child("rStyle"); rs != nil {
 			cs = mergeChar(cs, r.styles.get(rs.Attr("val")).Char)
 		}
-		cs = mergeChar(cs, parseCharProps(rPr))
+		cs = mergeChar(cs, parseCharProps(rPr, r.theme))
 	}
 
 	var content strings.Builder

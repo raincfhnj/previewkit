@@ -26,7 +26,7 @@
 | 能力 | 说明 |
 |---|---|
 | 零第三方核心依赖 | 只用 Go 标准库，无 CGO、无派生仓库、无 AGPL/GPL |
-| 自研 Markdown | 安全子集，原始 HTML 一律转义，链接协议白名单 |
+| 自研 Markdown | 安全子集，原始 HTML 一律转义，链接协议白名单，支持嵌套列表 |
 | 自研 XLSX | ZIP + XML 解析，支持共享字符串、样式、主题色、合并、列宽、行高 |
 | 自研 DOCX | ZIP + XML 解析，支持段落、标题、表格、列表、超链接、内嵌图片 |
 | 自研 PPTX | ZIP + XML 解析，支持文本框、形状、表格、图片、背景、占位符布局、主题色、旋转 |
@@ -49,7 +49,7 @@ go get github.com/raincfhnj/previewkit
 其他项目引用：
 
 ```
-require github.com/raincfhnj/previewkit v0.4.0
+require github.com/raincfhnj/previewkit v0.5.0
 ```
 
 本地开发：
@@ -181,6 +181,7 @@ PDF.js 是 Apache-2.0，可商用；它不是本库依赖，需要你自己放�
 - 段落、标题（Heading 1–6）
 - 粗体、斜体、下划线、删除线
 - 字号、字体颜色、高亮/底纹
+- 主题色（themeColor，含 tint/shade）
 - 左/中/右/两端对齐
 - 无序列表、有序列表（基础编号）
 - 表格、`gridSpan` 横向合并、`vMerge` 纵向合并
@@ -214,6 +215,7 @@ PDF.js 是 Apache-2.0，可商用；它不是本库依赖，需要你自己放�
 - 粗体、斜体、下划线、删除线
 - 字号、字体颜色、背景填充色
 - 主题色（theme index）
+- 单元格边框（thin/medium/thick/dashed/dotted/double）
 - 水平/垂直对齐、自动换行
 
 明确不支持：

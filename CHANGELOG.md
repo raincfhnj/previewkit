@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.0
+
+- DOCX: resolve `w:themeColor` with tint/shade for text and shading.
+- XLSX: render cell borders (left/right/top/bottom) with common styles.
+- Markdown: nested list rendering.
+- Added DOCX theme-color and XLSX border fixtures.
+
 ## v0.4.0
 
 - Added OOXML theme color resolution for PPTX and XLSX:

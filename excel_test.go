@@ -52,9 +52,19 @@ func TestRenderXLSX(t *testing.T) {
     <fill><patternFill patternType="gray125"/></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFFFFF00"/><bgColor indexed="64"/></patternFill></fill>
   </fills>
+  <borders count="2">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border>
+      <left style="thin"><color rgb="FFFF0000"/></left>
+      <right style="thin"><color rgb="FFFF0000"/></right>
+      <top style="thin"><color rgb="FFFF0000"/></top>
+      <bottom style="thin"><color rgb="FFFF0000"/></bottom>
+      <diagonal/>
+    </border>
+  </borders>
   <cellXfs count="2">
-    <xf numFmtId="0" fontId="0" fillId="0"/>
-    <xf numFmtId="0" fontId="1" fillId="2" applyFont="1" applyFill="1"/>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/>
   </cellXfs>
 </styleSheet>`,
 		"xl/theme/theme1.xml": `<?xml version="1.0" encoding="UTF-8"?>
@@ -117,6 +127,7 @@ func TestRenderXLSX(t *testing.T) {
 		"font-weight:600",
 		"color:#FF00FF",
 		"background-color:#FFFF00",
+		"border-left:1px solid #FF0000",
 		`data-pk-sheet="Sheet1"`,
 		`width:110px`,
 	} {

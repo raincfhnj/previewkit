@@ -71,10 +71,23 @@ type fillStyle struct {
 	Color string
 }
 
+type borderSide struct {
+	Style string
+	Color string
+}
+
+type borderStyle struct {
+	Left   borderSide
+	Right  borderSide
+	Top    borderSide
+	Bottom borderSide
+}
+
 type xfStyle struct {
 	NumFmtID  int
 	FontID    int
 	FillID    int
+	BorderID  int
 	ApplyFont bool
 	ApplyFill bool
 	HAlign    string
@@ -85,6 +98,7 @@ type xfStyle struct {
 type styles struct {
 	Fonts   []fontStyle
 	Fills   []fillStyle
+	Borders []borderStyle
 	XFs     []xfStyle
 	NumFmts map[int]string
 }
@@ -294,12 +308,24 @@ func parseStyles(root *ooxml.Node, theme map[string]string) styles {
 		}
 	}
 
+	if borders := root.Child("borders"); borders != nil {
+		for _, b := range borders.Children("border") {
+			st.Borders = append(st.Borders, borderStyle{
+				Left:   parseBorderSide(b.Child("left"), theme),
+				Right:  parseBorderSide(b.Child("right"), theme),
+				Top:    parseBorderSide(b.Child("top"), theme),
+				Bottom: parseBorderSide(b.Child("bottom"), theme),
+			})
+		}
+	}
+
 	if xfs := root.Child("cellXfs"); xfs != nil {
 		for _, x := range xfs.Children("xf") {
 			xf := xfStyle{
 				NumFmtID:  ooxml.ParseInt(x.Attr("numFmtId")),
 				FontID:    ooxml.ParseInt(x.Attr("fontId")),
 				FillID:    ooxml.ParseInt(x.Attr("fillId")),
+				BorderID:  ooxml.ParseInt(x.Attr("borderId")),
 				ApplyFont: ooxml.ParseBool(x.Attr("applyFont")),
 				ApplyFill: ooxml.ParseBool(x.Attr("applyFill")),
 			}
@@ -313,6 +339,24 @@ func parseStyles(root *ooxml.Node, theme map[string]string) styles {
 	}
 
 	return st
+}
+
+func parseBorderSide(n *ooxml.Node, theme map[string]string) borderSide {
+	if n == nil {
+		return borderSide{}
+	}
+	style := n.Attr("style")
+	if style == "" || style == "none" {
+		return borderSide{}
+	}
+	color := ""
+	if c := n.Child("color"); c != nil {
+		color = colorFromNode(c, theme)
+	}
+	if color == "" {
+		color = "#000000"
+	}
+	return borderSide{Style: style, Color: color}
 }
 
 func colorFromNode(n *ooxml.Node, theme map[string]string) string {
@@ -683,7 +727,38 @@ func styleCSS(id int, st styles) string {
 	if xf.Wrap {
 		css = append(css, "white-space:pre-wrap")
 	}
+	if xf.BorderID >= 0 && xf.BorderID < len(st.Borders) {
+		b := st.Borders[xf.BorderID]
+		css = append(css, borderCSS("border-left", b.Left)...)
+		css = append(css, borderCSS("border-right", b.Right)...)
+		css = append(css, borderCSS("border-top", b.Top)...)
+		css = append(css, borderCSS("border-bottom", b.Bottom)...)
+	}
 	return strings.Join(css, ";")
+}
+
+func borderCSS(property string, side borderSide) []string {
+	if side.Style == "" {
+		return nil
+	}
+	width := "1px"
+	style := "solid"
+	switch strings.ToLower(side.Style) {
+	case "medium":
+		width = "2px"
+	case "thick":
+		width = "3px"
+	case "double":
+		width = "3px"
+		style = "double"
+	case "dashed", "dashdot", "dashdotdot":
+		style = "dashed"
+	case "dotted":
+		style = "dotted"
+	case "hair":
+		width = "1px"
+	}
+	return []string{property + ":" + width + " " + style + " " + side.Color}
 }
 
 func (st styles) xf(id int) xfStyle {

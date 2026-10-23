@@ -25,6 +25,25 @@ func TestRenderDOCX(t *testing.T) {
     <w:name w:val="heading 1"/>
   </w:style>
 </w:styles>`,
+		"word/theme/theme1.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <a:themeElements>
+    <a:clrScheme name="Test">
+      <a:dk1><a:srgbClr val="111111"/></a:dk1>
+      <a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>
+      <a:dk2><a:srgbClr val="222222"/></a:dk2>
+      <a:lt2><a:srgbClr val="EEEEEE"/></a:lt2>
+      <a:accent1><a:srgbClr val="FF00FF"/></a:accent1>
+      <a:accent2><a:srgbClr val="00FF00"/></a:accent2>
+      <a:accent3><a:srgbClr val="0000FF"/></a:accent3>
+      <a:accent4><a:srgbClr val="FFFF00"/></a:accent4>
+      <a:accent5><a:srgbClr val="00FFFF"/></a:accent5>
+      <a:accent6><a:srgbClr val="FF0000"/></a:accent6>
+      <a:hlink><a:srgbClr val="0000EE"/></a:hlink>
+      <a:folHlink><a:srgbClr val="551A8B"/></a:folHlink>
+    </a:clrScheme>
+  </a:themeElements>
+</a:theme>`,
 		"word/numbering.xml": `<?xml version="1.0" encoding="UTF-8"?>
 <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:abstractNum w:abstractNumId="0">
@@ -40,7 +59,7 @@ func TestRenderDOCX(t *testing.T) {
       <w:r><w:t>标题</w:t></w:r>
     </w:p>
     <w:p>
-      <w:r><w:rPr><w:b/><w:color w:val="FF0000"/></w:rPr><w:t>加粗文字</w:t></w:r>
+      <w:r><w:rPr><w:b/><w:color w:themeColor="accent1"/></w:rPr><w:t>加粗文字</w:t></w:r>
     </w:p>
     <w:p>
       <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>
@@ -81,7 +100,7 @@ func TestRenderDOCX(t *testing.T) {
 		"<h1",
 		"标题",
 		"<strong>",
-		"color:#FF0000",
+		"color:#FF00FF",
 		"• ",
 		"列表项",
 		`colspan="2"`,
