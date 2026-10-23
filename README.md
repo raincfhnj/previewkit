@@ -26,10 +26,10 @@
 | 能力 | 说明 |
 |---|---|
 | 零第三方核心依赖 | 只用 Go 标准库，无 CGO、无派生仓库、无 AGPL/GPL |
-| 自研 Markdown | 安全子集，原始 HTML 一律转义，链接协议白名单，支持嵌套列表 |
-| 自研 XLSX | ZIP + XML 解析，支持共享字符串、样式、主题色、合并、列宽、行高 |
-| 自研 DOCX | ZIP + XML 解析，支持段落、标题、表格、列表、超链接、内嵌图片 |
-| 自研 PPTX | ZIP + XML 解析，支持文本框、形状、表格、图片、背景、占位符布局、主题色、旋转 |
+| 自研 Markdown | 安全子集，原始 HTML 一律转义，链接协议白名单，支持嵌套列表、引用式链接 |
+| 自研 XLSX | ZIP + XML 解析，支持共享字符串、样式、主题色、边框、内嵌图片、合并、列宽、行高 |
+| 自研 DOCX | ZIP + XML 解析，支持段落、标题、表格、列表、页眉页脚、脚注、批注、修订、图片 |
+| 自研 PPTX | ZIP + XML 解析，支持文本框、形状、表格、图片、背景、主题色/主题字体、组合变换 |
 | 自研文本编码 | UTF-8 / UTF-16 / GBK，内置紧凑 GBK 映射表 |
 | 自研 singleflight | 同一个 Office 文件并发预览只转换一次 |
 | Range 友好 | 返回文件路径，配合 `http.ServeContent` 支持 PDF 分页/视频拖动 |
@@ -49,7 +49,7 @@ go get github.com/raincfhnj/previewkit
 其他项目引用：
 
 ```
-require github.com/raincfhnj/previewkit v0.8.0
+require github.com/raincfhnj/previewkit v0.9.0
 ```
 
 本地开发：
@@ -187,6 +187,8 @@ PDF.js 是 Apache-2.0，可商用；它不是本库依赖，需要你自己放�
 - 表格、`gridSpan` 横向合并、`vMerge` 纵向合并
 - 页眉、页脚（首个 default section）
 - 脚注（引用 + 文末脚注区）
+- 批注（引用 + 文末批注区）
+- 修订（ins/del/moveTo/moveFrom）
 - 超链接（http/https/mailto）
 - 内嵌 PNG/JPEG/GIF/WebP/BMP 图片（data URI）
 - 多段落、嵌套表格
@@ -195,7 +197,6 @@ PDF.js 是 Apache-2.0，可商用；它不是本库依赖，需要你自己放�
 
 - 浮动图片、文本框、艺术字
 - 图表、SmartArt、公式（OMML）
-- 批注、修订
 - 分栏、精确分页
 - `.doc` 旧二进制格式
 
@@ -218,13 +219,13 @@ PDF.js 是 Apache-2.0，可商用；它不是本库依赖，需要你自己放�
 - 字号、字体颜色、背景填充色
 - 主题色（theme index）
 - 单元格边框（thin/medium/thick/dashed/dotted/double）
+- 内嵌图片（按 drawing anchor 定位）
 - 水平/垂直对齐、自动换行
 
 明确不支持：
 
 - 图表
-- 图片、形状
-- 条件格式
+- 形状、条件格式
 - 数据透视表
 - 公式计算（只显示 Excel 缓存值）
 - 复杂自定义数字格式
@@ -252,6 +253,8 @@ engine := previewkit.New(
 - 粗体、斜体、下划线、删除线
 - 字号、字体颜色、高亮
 - 主题色（accent1/…/dk1/lt1 等）
+- 主题字体（+mj-lt/+mn-lt/+mj-ea/+mn-ea）
+- 一级母版文本样式（title/body/other）
 - 基础旋转、水平/垂直翻转
 - 组合形状坐标变换、文字缩放
 - 表格（含 `gridSpan` / `rowSpan`）
@@ -262,7 +265,7 @@ engine := previewkit.New(
 
 - 图表、SmartArt
 - 动画、切换
-- 主题/母版的完整继承
+- 主题/母版的完整继承（目前支持基础字体和一级样式）
 - 视频、音频
 - 备注页
 
@@ -356,12 +359,19 @@ func (MyConverter) ConvertToPDF(ctx context.Context, name string, r io.Reader) (
 
 .pk-table { border-collapse: collapse; table-layout: fixed; }
 .pk-cell { border: 1px solid #d1d5db; padding: 4px 8px; vertical-align: middle; }
+.pk-sheet-canvas { position: relative; }
+.pk-sheet-img { position: absolute; object-fit: contain; pointer-events: none; }
 
 .pk-docx { max-width: 900px; margin: 24px auto; }
 .pk-docx-header { border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; margin-bottom: 24px; color: #4b5563; }
 .pk-docx-footer { border-top: 1px solid #e5e7eb; padding-top: 8px; margin-top: 24px; color: #4b5563; }
 .pk-docx-footnotes { margin-top: 24px; font-size: .9em; color: #4b5563; }
 .pk-docx-fn-ref { font-size: .8em; }
+.pk-docx-comments { margin-top: 24px; font-size: .9em; color: #4b5563; }
+.pk-docx-comment-ref { font-size: .8em; }
+.pk-docx-comment-meta { font-weight: 600; margin-bottom: 4px; }
+.pk-docx-ins { background: #dcfce7; text-decoration: underline; }
+.pk-docx-del { background: #fee2e2; text-decoration: line-through; }
 .pk-docx-p { white-space: pre-wrap; margin: 0 0 0.8em; }
 .pk-docx-table { border-collapse: collapse; width: 100%; margin: 1em 0; }
 .pk-docx-cell { border: 1px solid #d1d5db; padding: 6px 8px; vertical-align: top; }
@@ -508,8 +518,10 @@ go run ./examples/local
 - [x] DOCX `vMerge`
 - [x] DOCX 页眉页脚
 - [x] DOCX 脚注
-- [ ] DOCX 批注、修订
-- [ ] XLSX 图表/图片占位
+- [x] DOCX 批注、修订
+- [x] XLSX 内嵌图片
+- [x] Markdown 引用式链接
+- [ ] XLSX 图表
 - [ ] PDF 首页缩略图（可选 WASM 模块）
 - [ ] 异步转换任务接口
 - [ ] S3/MinIO 缓存后端

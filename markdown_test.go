@@ -40,6 +40,31 @@ func TestRenderMarkdownNestedList(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdownReferenceLinks(t *testing.T) {
+	src := []byte("[foo][id] and ![pic][img] and [shortcut]\n\n" +
+		"[id]: https://example.com \"Title\"\n" +
+		"[img]: https://example.com/a.png\n" +
+		"[shortcut]: https://example.com/short\n" +
+		"[unused]: https://example.com/unused\n")
+	out, err := RenderMarkdown(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		`<a href="https://example.com" title="Title"`,
+		`<img src="https://example.com/a.png" alt="pic"`,
+		`<a href="https://example.com/short"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in %s", want, s)
+		}
+	}
+	if strings.Contains(s, "[id]:") {
+		t.Fatalf("reference definition leaked into output: %s", s)
+	}
+}
+
 func TestRenderMarkdownInline(t *testing.T) {
 	src := []byte("**bold** *em* __strong__ ~~del~~ `code` [link](https://example.com)\n\n<img src=x onerror=alert(1)>\n\n[bad](javascript:alert(1))")
 	out, err := RenderMarkdown(src)

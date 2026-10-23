@@ -18,6 +18,13 @@ type ExcelOptions struct {
 
 	// MaxXMLBytes limits each uncompressed OOXML part. Values <= 0 use 32 MiB.
 	MaxXMLBytes int64
+
+	// MaxImageBytes limits one embedded image. Values <= 0 use 4 MiB.
+	MaxImageBytes int64
+
+	// MaxTotalImageBytes bounds all embedded images in one workbook.
+	// Values <= 0 use 20 MiB.
+	MaxTotalImageBytes int64
 }
 
 // RenderXLSX converts an XLSX/XLSM workbook to an HTML fragment.
@@ -27,8 +34,10 @@ type ExcelOptions struct {
 // heights, and a subset of cell styling.
 func RenderXLSX(path string, opts ExcelOptions) (template.HTML, error) {
 	return xlsx.Render(path, xlsx.Options{
-		MaxRows:     opts.MaxRows,
-		MaxCols:     opts.MaxCols,
-		MaxXMLBytes: opts.MaxXMLBytes,
+		MaxRows:            opts.MaxRows,
+		MaxCols:            opts.MaxCols,
+		MaxXMLBytes:        opts.MaxXMLBytes,
+		MaxImageBytes:      opts.MaxImageBytes,
+		MaxTotalImageBytes: opts.MaxTotalImageBytes,
 	})
 }

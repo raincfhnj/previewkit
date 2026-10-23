@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.0
+
+- DOCX: comments (range markers, reference links, comment section).
+- DOCX: tracked changes for ins/del/moveTo/moveFrom.
+- XLSX: embedded images with twoCell/oneCell/absolute drawing anchors.
+- XLSX: image size limits in `ExcelOptions`.
+- PPTX: theme fonts (+mj-lt/+mn-lt/+mj-ea/+mn-ea).
+- PPTX: level-1 master title/body/other text styles.
+- Markdown: reference-style links and images.
+- Parallelized implementation across isolated worktrees.
+
 ## v0.8.0
 
 - DOCX: render footnote references and a footnotes section.

@@ -14,19 +14,71 @@ import (
 	"strings"
 )
 
-var tableSeparator = regexp.MustCompile(`^:?-{3,}:?$`)
+var (
+	tableSeparator = regexp.MustCompile(`^:?-{3,}:?$`)
+	referenceDef   = regexp.MustCompile(`^\s{0,3}\[([^\]]+)\]:\s*(\S+)(?:\s+(?:"([^"]*)"|'([^']*)'|\(([^)]*)\)))?\s*$`)
+)
+
+type ref struct {
+	URL   string
+	Title string
+}
 
 // Render converts Markdown to an HTML fragment.
 func Render(src []byte) (string, error) {
 	s := strings.ReplaceAll(string(src), "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
 
+	lines, refs := parseReferenceDefinitions(strings.Split(s, "\n"))
+
 	var b strings.Builder
-	renderBlocks(&b, strings.Split(s, "\n"))
+	renderBlocks(&b, lines, refs)
 	return b.String(), nil
 }
 
-func renderBlocks(b *strings.Builder, lines []string) {
+func parseReferenceDefinitions(lines []string) ([]string, map[string]ref) {
+	refs := map[string]ref{}
+	out := make([]string, 0, len(lines))
+	fenceMarker := ""
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if fenceMarker != "" {
+			if strings.HasPrefix(trimmed, fenceMarker) {
+				fenceMarker = ""
+			}
+			out = append(out, line)
+			continue
+		}
+		if marker, _, ok := fence(line); ok {
+			fenceMarker = marker
+			out = append(out, line)
+			continue
+		}
+
+		m := referenceDef.FindStringSubmatch(line)
+		if m == nil {
+			out = append(out, line)
+			continue
+		}
+
+		dest := m[2]
+		if strings.HasPrefix(dest, "<") && strings.HasSuffix(dest, ">") {
+			dest = dest[1 : len(dest)-1]
+		}
+		title := m[3]
+		if title == "" {
+			title = m[4]
+		}
+		if title == "" {
+			title = m[5]
+		}
+		refs[strings.ToLower(m[1])] = ref{URL: dest, Title: title}
+	}
+	return out, refs
+}
+
+func renderBlocks(b *strings.Builder, lines []string, refs map[string]ref) {
 	for i := 0; i < len(lines); {
 		if strings.TrimSpace(lines[i]) == "" {
 			i++
@@ -56,7 +108,7 @@ func renderBlocks(b *strings.Builder, lines []string) {
 
 		if level, text, ok := heading(lines[i]); ok {
 			tag := "h" + strconv.Itoa(level)
-			b.WriteString("<" + tag + ">" + inline(text) + "</" + tag + ">\n")
+			b.WriteString("<" + tag + ">" + inline(text, refs) + "</" + tag + ">\n")
 			i++
 			continue
 		}
@@ -77,22 +129,22 @@ func renderBlocks(b *strings.Builder, lines []string) {
 				i++
 			}
 			b.WriteString("<blockquote>\n")
-			renderBlocks(b, inner)
+			renderBlocks(b, inner, refs)
 			b.WriteString("</blockquote>\n")
 			continue
 		}
 
 		if isTableStart(lines, i) {
-			i = renderTable(b, lines, i)
+			i = renderTable(b, lines, i, refs)
 			continue
 		}
 
 		if _, _, _, ok := listMarker(lines[i], false); ok {
-			i = renderList(b, lines, i, false)
+			i = renderList(b, lines, i, false, refs)
 			continue
 		}
 		if _, _, _, ok := listMarker(lines[i], true); ok {
-			i = renderList(b, lines, i, true)
+			i = renderList(b, lines, i, true, refs)
 			continue
 		}
 
@@ -104,7 +156,7 @@ func renderBlocks(b *strings.Builder, lines []string) {
 			}
 			i++
 		}
-		b.WriteString("<p>" + inline(strings.Join(lines[start:i], "\n")) + "</p>\n")
+		b.WriteString("<p>" + inline(strings.Join(lines[start:i], "\n"), refs) + "</p>\n")
 	}
 }
 
@@ -213,7 +265,7 @@ func listMarker(line string, ordered bool) (indent int, content string, start in
 	return 0, "", 0, false
 }
 
-func renderList(b *strings.Builder, lines []string, i int, ordered bool) int {
+func renderList(b *strings.Builder, lines []string, i int, ordered bool, refs map[string]ref) int {
 	baseIndent, _, first, _ := listMarker(lines[i], ordered)
 
 	tag := "ul"
@@ -262,13 +314,13 @@ func renderList(b *strings.Builder, lines []string, i int, ordered bool) int {
 				b.WriteString(` checked`)
 			}
 			b.WriteString(`> `)
-			b.WriteString(inline(rest))
+			b.WriteString(inline(rest, refs))
 		} else {
-			b.WriteString(inline(content))
+			b.WriteString(inline(content, refs))
 		}
 		if len(nested) > 0 {
 			b.WriteString("\n")
-			renderBlocks(b, nested)
+			renderBlocks(b, nested, refs)
 		}
 		b.WriteString("</li>\n")
 	}
@@ -312,7 +364,7 @@ func isTableStart(lines []string, i int) bool {
 	return true
 }
 
-func renderTable(b *strings.Builder, lines []string, i int) int {
+func renderTable(b *strings.Builder, lines []string, i int, refs map[string]ref) int {
 	header := splitRow(lines[i])
 	sep := splitRow(lines[i+1])
 	align := make([]string, len(sep))
@@ -333,7 +385,7 @@ func renderTable(b *strings.Builder, lines []string, i int) int {
 		if align[j] != "" {
 			b.WriteString(` style="text-align:` + align[j] + `"`)
 		}
-		b.WriteString(`>` + inline(strings.TrimSpace(cell)) + `</th>`)
+		b.WriteString(`>` + inline(strings.TrimSpace(cell), refs) + `</th>`)
 	}
 	b.WriteString("</tr></thead>\n<tbody>\n")
 
@@ -350,7 +402,7 @@ func renderTable(b *strings.Builder, lines []string, i int) int {
 			}
 			b.WriteString(`>`)
 			if j < len(row) {
-				b.WriteString(inline(strings.TrimSpace(row[j])))
+				b.WriteString(inline(strings.TrimSpace(row[j]), refs))
 			}
 			b.WriteString("</td>")
 		}
@@ -372,13 +424,13 @@ func splitRow(line string) []string {
 	return parts
 }
 
-func inline(s string) string {
+func inline(s string, refs map[string]ref) string {
 	var b strings.Builder
-	writeInline(&b, s)
+	writeInline(&b, s, refs)
 	return b.String()
 }
 
-func writeInline(b *strings.Builder, s string) {
+func writeInline(b *strings.Builder, s string, refs map[string]ref) {
 	for i := 0; i < len(s); {
 		switch s[i] {
 		case '\\':
@@ -407,7 +459,7 @@ func writeInline(b *strings.Builder, s string) {
 
 		case '!':
 			if i+1 < len(s) && s[i+1] == '[' {
-				if next, ok := writeLinkOrImage(b, s, i, true); ok {
+				if next, ok := writeLinkOrImage(b, s, i, true, refs); ok {
 					i = next
 					continue
 				}
@@ -416,7 +468,7 @@ func writeInline(b *strings.Builder, s string) {
 			i++
 
 		case '[':
-			if next, ok := writeLinkOrImage(b, s, i, false); ok {
+			if next, ok := writeLinkOrImage(b, s, i, false, refs); ok {
 				i = next
 				continue
 			}
@@ -447,7 +499,7 @@ func writeInline(b *strings.Builder, s string) {
 			i++
 
 		case '*', '_', '~':
-			if next, ok := writeEmphasis(b, s, i); ok {
+			if next, ok := writeEmphasis(b, s, i, refs); ok {
 				i = next
 				continue
 			}
@@ -478,7 +530,7 @@ func isEscapable(c byte) bool {
 	return strings.ContainsRune("\\`*_{}[]()#+-.!>~|", rune(c))
 }
 
-func writeEmphasis(b *strings.Builder, s string, i int) (int, bool) {
+func writeEmphasis(b *strings.Builder, s string, i int, refs map[string]ref) (int, bool) {
 	ch := s[i]
 	n := 1
 	for i+n < len(s) && s[i+n] == ch {
@@ -522,22 +574,22 @@ func writeEmphasis(b *strings.Builder, s string, i int) (int, bool) {
 		switch {
 		case ch == '~' && n == 2:
 			b.WriteString("<del>")
-			writeInline(b, inner)
+			writeInline(b, inner, refs)
 			b.WriteString("</del>")
 		case n == 2:
 			b.WriteString("<strong>")
-			writeInline(b, inner)
+			writeInline(b, inner, refs)
 			b.WriteString("</strong>")
 		default:
 			b.WriteString("<em>")
-			writeInline(b, inner)
+			writeInline(b, inner, refs)
 			b.WriteString("</em>")
 		}
 		return pos + n, true
 	}
 }
 
-func writeLinkOrImage(b *strings.Builder, s string, start int, image bool) (int, bool) {
+func writeLinkOrImage(b *strings.Builder, s string, start int, image bool, refs map[string]ref) (int, bool) {
 	labelStart := start + 1
 	if image {
 		labelStart = start + 2
@@ -547,17 +599,42 @@ func writeLinkOrImage(b *strings.Builder, s string, start int, image bool) (int,
 		return start, false
 	}
 	closeLabel += labelStart
-	if closeLabel+1 >= len(s) || s[closeLabel+1] != '(' {
-		return start, false
-	}
-
-	closeDest, ok := findClosingParen(s, closeLabel+2)
-	if !ok {
-		return start, false
-	}
-
 	label := s[labelStart:closeLabel]
-	dest, title := parseDestination(s[closeLabel+2 : closeDest])
+
+	var dest, title string
+	end := closeLabel + 1
+
+	if end < len(s) && s[end] == '(' {
+		closeDest, ok := findClosingParen(s, end+1)
+		if !ok {
+			return start, false
+		}
+		dest, title = parseDestination(s[end+1 : closeDest])
+		end = closeDest + 1
+	} else if end < len(s) && s[end] == '[' {
+		closeRef := strings.IndexByte(s[end+1:], ']')
+		if closeRef < 0 {
+			return start, false
+		}
+		closeRef += end + 1
+		id := strings.TrimSpace(s[end+1 : closeRef])
+		if id == "" {
+			id = label
+		}
+		r, ok := refs[strings.ToLower(id)]
+		if !ok {
+			return start, false
+		}
+		dest, title = r.URL, r.Title
+		end = closeRef + 1
+	} else {
+		r, ok := refs[strings.ToLower(strings.TrimSpace(label))]
+		if !ok {
+			return start, false
+		}
+		dest, title = r.URL, r.Title
+	}
+
 	u, ok := safeURL(dest, image)
 	if !ok {
 		return start, false
@@ -576,10 +653,10 @@ func writeLinkOrImage(b *strings.Builder, s string, start int, image bool) (int,
 			b.WriteString(` title="` + html.EscapeString(title) + `"`)
 		}
 		b.WriteString(` rel="noopener noreferrer">`)
-		writeInline(b, label)
+		writeInline(b, label, refs)
 		b.WriteString(`</a>`)
 	}
-	return closeDest + 1, true
+	return end, true
 }
 
 func findClosingParen(s string, start int) (int, bool) {
