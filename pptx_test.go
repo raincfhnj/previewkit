@@ -59,8 +59,49 @@ func TestRenderPPTX(t *testing.T) {
       <a:hlink><a:srgbClr val="0000EE"/></a:hlink>
       <a:folHlink><a:srgbClr val="551A8B"/></a:folHlink>
     </a:clrScheme>
+    <a:fontScheme name="Test">
+      <a:majorFont>
+        <a:latin typeface="Major Theme Font"/>
+        <a:ea typeface="Major EA"/>
+      </a:majorFont>
+      <a:minorFont>
+        <a:latin typeface="Minor Theme Font"/>
+        <a:ea typeface="Minor EA"/>
+      </a:minorFont>
+    </a:fontScheme>
   </a:themeElements>
 </a:theme>`,
+		"ppt/slideMasters/slideMaster1.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld><p:spTree/></p:cSld>
+  <p:txStyles>
+    <p:titleStyle>
+      <a:lvl1pPr>
+        <a:defRPr sz="4000" b="1">
+          <a:solidFill><a:schemeClr val="accent2"/></a:solidFill>
+          <a:latin typeface="+mj-lt"/>
+        </a:defRPr>
+      </a:lvl1pPr>
+    </p:titleStyle>
+    <p:bodyStyle>
+      <a:lvl1pPr>
+        <a:defRPr sz="2000">
+          <a:solidFill><a:schemeClr val="accent3"/></a:solidFill>
+          <a:latin typeface="+mn-lt"/>
+        </a:defRPr>
+      </a:lvl1pPr>
+    </p:bodyStyle>
+    <p:otherStyle>
+      <a:lvl1pPr>
+        <a:defRPr sz="1800">
+          <a:solidFill><a:schemeClr val="dk2"/></a:solidFill>
+          <a:latin typeface="+mn-lt"/>
+        </a:defRPr>
+      </a:lvl1pPr>
+    </p:otherStyle>
+  </p:txStyles>
+</p:sldMaster>`,
 		"ppt/slides/slide1.xml": `<?xml version="1.0" encoding="UTF-8"?>
 <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -78,7 +119,7 @@ func TestRenderPPTX(t *testing.T) {
       <p:sp>
         <p:nvSpPr><p:cNvPr id="3" name="Body"/><p:cNvSpPr/><p:nvPr><p:ph type="body"/></p:nvPr></p:nvSpPr>
         <p:spPr><a:xfrm><a:off x="609600" y="2286000"/><a:ext cx="10972800" cy="1371600"/></a:xfrm></p:spPr>
-        <p:txBody><a:bodyPr/><a:p><a:pPr><a:buChar char="•"/></a:pPr><a:r><a:t>正文</a:t></a:r></a:p></p:txBody>
+        <p:txBody><a:bodyPr/><a:p><a:pPr><a:buChar char="•"/></a:pPr><a:r><a:rPr><a:latin typeface="+mn-lt"/></a:rPr><a:t>正文</a:t></a:r></a:p></p:txBody>
       </p:sp>
       <p:graphicFrame>
         <p:nvGraphicFramePr><p:cNvPr id="4" name="Table"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>
@@ -109,7 +150,10 @@ func TestRenderPPTX(t *testing.T) {
     <p:sp>
       <p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
       <p:spPr><a:xfrm><a:off x="609600" y="457200"/><a:ext cx="10972800" cy="1371600"/></a:xfrm></p:spPr>
-      <p:txBody><a:bodyPr/><a:p><a:r><a:t>第二页</a:t></a:r></a:p></p:txBody>
+      <p:txBody><a:bodyPr/><a:p>
+        <a:r><a:rPr><a:latin typeface="+mj-lt"/></a:rPr><a:t>第二页</a:t></a:r>
+        <a:r><a:rPr><a:ea typeface="+mj-ea"/></a:rPr><a:t>EA</a:t></a:r>
+      </a:p></p:txBody>
     </p:sp>
   </p:spTree></p:cSld>
 </p:sld>`,
@@ -149,6 +193,15 @@ func TestRenderPPTX(t *testing.T) {
 		"组内",
 		"left:48.0px;top:440.9px;width:144.0px;height:72.0px",
 		"font-size:36.0px",
+		"font-family:&#39;Major Theme Font&#39;",
+		"font-family:&#39;Minor Theme Font&#39;",
+		"font-family:&#39;Major EA&#39;",
+		"font-size:40.0px",
+		"color:#00FF00",
+		"font-size:20.0px",
+		"color:#0000FF",
+		"font-size:32.0px",
+		"color:#222222",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("rendered HTML does not contain %q", want)

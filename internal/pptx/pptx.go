@@ -94,7 +94,18 @@ type renderer struct {
 	curRels     map[string]relInfo
 	layoutCache map[string]map[string]rect
 	theme       map[string]string
+	themeFonts  map[string]string
+	master      masterTextStyles
 	textScale   float64
+}
+
+// masterTextStyles holds level-1 run defaults parsed from the slide master's
+// p:txStyles. Font sizes are converted to CSS pixels for the slide scale;
+// r.textScale is applied when a style is used in a group.
+type masterTextStyles struct {
+	title runStyle
+	body  runStyle
+	other runStyle
 }
 
 type slideRef struct {
@@ -166,8 +177,10 @@ func Render(filePath string, opts Options) (template.HTML, error) {
 		slideH:      int(math.Round(float64(slideCY) / emuPerPixel * scale)),
 		layoutCache: map[string]map[string]rect{},
 		theme:       ooxml.ReadThemeColors(zr, "ppt/theme/", opts.MaxXMLBytes),
+		themeFonts:  readThemeFonts(zr, "ppt/theme/", opts.MaxXMLBytes),
 		textScale:   1,
 	}
+	r.master = r.readMasterTextStyles()
 
 	var b strings.Builder
 	b.WriteString(`<div class="pk-pptx">`)
@@ -214,6 +227,105 @@ func relID(n *ooxml.Node) string {
 		}
 	}
 	return ""
+}
+
+// readThemeFonts reads the major and minor font typefaces from the first theme
+// under prefix. The returned keys are the DrawingML theme font references.
+func readThemeFonts(zr *zip.ReadCloser, prefix string, limit int64) map[string]string {
+	out := map[string]string{}
+
+	themePath := firstZipPart(zr, prefix, ".xml")
+	if themePath == "" {
+		return out
+	}
+	data, err := ooxml.ReadZipFileLimited(zr, themePath, limit)
+	if err != nil {
+		return out
+	}
+	root, err := ooxml.ParseXML(data)
+	if err != nil {
+		return out
+	}
+	scheme := findFirst(root, "fontScheme")
+	if scheme == nil {
+		return out
+	}
+
+	fonts := []struct {
+		node      *ooxml.Node
+		latin, ea string
+	}{
+		{scheme.Child("majorFont"), "+mj-lt", "+mj-ea"},
+		{scheme.Child("minorFont"), "+mn-lt", "+mn-ea"},
+	}
+	for _, font := range fonts {
+		if font.node == nil {
+			continue
+		}
+		if latin := font.node.Child("latin"); latin != nil {
+			if name := safeFont(latin.Attr("typeface")); name != "" {
+				out[font.latin] = name
+			}
+		}
+		if ea := font.node.Child("ea"); ea != nil {
+			if name := safeFont(ea.Attr("typeface")); name != "" {
+				out[font.ea] = name
+			}
+		}
+	}
+	return out
+}
+
+func firstZipPart(zr *zip.ReadCloser, prefix, suffix string) string {
+	lowerPrefix := strings.ToLower(prefix)
+	lowerSuffix := strings.ToLower(suffix)
+	for _, f := range zr.File {
+		lower := strings.ToLower(f.Name)
+		if strings.HasPrefix(lower, lowerPrefix) && strings.HasSuffix(lower, lowerSuffix) {
+			return f.Name
+		}
+	}
+	return ""
+}
+
+// readMasterTextStyles builds level-1 defaults from the first slide master.
+// Full placeholder inheritance chains are intentionally not resolved.
+func (r *renderer) readMasterTextStyles() masterTextStyles {
+	defaults := runStyle{fontPx: 18 * 96 / 72 * r.scale}
+	out := masterTextStyles{title: defaults, body: defaults, other: defaults}
+
+	masterPath := firstZipPart(r.zr, "ppt/slideMasters/", ".xml")
+	if masterPath == "" {
+		return out
+	}
+	data, err := ooxml.ReadZipFileLimited(r.zr, masterPath, r.opts.MaxXMLBytes)
+	if err != nil {
+		return out
+	}
+	root, err := ooxml.ParseXML(data)
+	if err != nil {
+		return out
+	}
+	txStyles := findFirst(root, "txStyles")
+	if txStyles == nil {
+		return out
+	}
+
+	parse := func(name string, base runStyle) runStyle {
+		style := txStyles.Child(name)
+		if style == nil {
+			return base
+		}
+		lvl := style.Child("lvl1pPr")
+		if lvl == nil {
+			return base
+		}
+		return r.parseRunStyle(lvl.Child("defRPr"), base)
+	}
+	out.title = parse("titleStyle", out.title)
+	out.body = parse("bodyStyle", out.body)
+	out.other = parse("otherStyle", out.other)
+	return out
 }
 
 func (r *renderer) renderSlide(b *strings.Builder, index int, slidePath string) error {
@@ -365,9 +477,25 @@ func (r *renderer) renderShape(b *strings.Builder, n *ooxml.Node, layout map[str
 
 	fmt.Fprintf(b, `<div class="pk-pptx-shape" style="%s">`, html.EscapeString(style))
 	if txBody := n.Child("txBody"); txBody != nil {
-		r.renderTextBody(b, txBody, true)
+		r.renderTextBody(b, txBody, true, r.masterStyleFor(placeholder(n)))
 	}
 	b.WriteString(`</div>`)
+}
+
+// masterStyleFor returns the level-1 master default for a placeholder.
+// Placeholders without an explicit type are normally content placeholders.
+func (r *renderer) masterStyleFor(ph *ooxml.Node) runStyle {
+	st := r.master.other
+	if ph != nil {
+		switch ph.Attr("type") {
+		case "title", "ctrTitle":
+			st = r.master.title
+		case "", "body", "obj", "subTitle":
+			st = r.master.body
+		}
+	}
+	st.fontPx *= r.textScale
+	return st
 }
 
 func (r *renderer) renderPicture(b *strings.Builder, n *ooxml.Node, rels map[string]relInfo, tr *transform) {
@@ -430,7 +558,7 @@ func (r *renderer) renderGraphicFrame(b *strings.Builder, n *ooxml.Node, tr *tra
 			}
 			b.WriteString(">")
 			if txBody := tc.Child("txBody"); txBody != nil {
-				r.renderParagraphs(b, txBody)
+				r.renderParagraphs(b, txBody, runStyle{})
 			}
 			b.WriteString("</td>")
 		}
@@ -593,7 +721,7 @@ func (r *renderer) readLayoutPlaceholders(rels map[string]relInfo) map[string]re
 	return out
 }
 
-func (r *renderer) renderTextBody(b *strings.Builder, txBody *ooxml.Node, flex bool) {
+func (r *renderer) renderTextBody(b *strings.Builder, txBody *ooxml.Node, flex bool, base runStyle) {
 	bodyPr := txBody.Child("bodyPr")
 	style := "white-space:pre-wrap;overflow:hidden;"
 	if flex {
@@ -622,17 +750,17 @@ func (r *renderer) renderTextBody(b *strings.Builder, txBody *ooxml.Node, flex b
 			inset("bIns", 45720), inset("lIns", 91440))
 	}
 	fmt.Fprintf(b, `<div class="pk-pptx-text" style="%s">`, html.EscapeString(style))
-	r.renderParagraphs(b, txBody)
+	r.renderParagraphs(b, txBody, base)
 	b.WriteString(`</div>`)
 }
 
-func (r *renderer) renderParagraphs(b *strings.Builder, parent *ooxml.Node) {
+func (r *renderer) renderParagraphs(b *strings.Builder, parent *ooxml.Node, base runStyle) {
 	for _, p := range parent.Children("p") {
-		r.renderParagraph(b, p)
+		r.renderParagraph(b, p, base)
 	}
 }
 
-func (r *renderer) renderParagraph(b *strings.Builder, p *ooxml.Node) {
+func (r *renderer) renderParagraph(b *strings.Builder, p *ooxml.Node, base runStyle) {
 	pPr := p.Child("pPr")
 	align := ""
 	style := "margin:0 0 0.35em 0;"
@@ -680,7 +808,10 @@ func (r *renderer) renderParagraph(b *strings.Builder, p *ooxml.Node) {
 		}
 	}
 
-	def := runStyle{fontPx: 18 * 96 / 72 * r.scale * r.textScale}
+	def := base
+	if def.fontPx <= 0 {
+		def.fontPx = 18 * 96 / 72 * r.scale * r.textScale
+	}
 	if pPr != nil {
 		if dr := pPr.Child("defRPr"); dr != nil {
 			def = r.parseRunStyle(dr, def)
@@ -723,12 +854,24 @@ func (r *renderer) parseRunStyle(rPr *ooxml.Node, base runStyle) runStyle {
 	if v := ooxml.ParseInt(rPr.Attr("sz")); v > 0 {
 		out.fontPx = float64(v) / 100 * 96 / 72 * r.scale * r.textScale
 	}
-	out.bold = rPr.Attr("b") == "1" || rPr.Attr("b") == "true"
-	out.italic = rPr.Attr("i") == "1" || rPr.Attr("i") == "true"
-	if u := rPr.Attr("u"); u != "" && u != "none" {
+	if v := rPr.Attr("b"); v != "" {
+		out.bold = v == "1" || v == "true"
+	}
+	if v := rPr.Attr("i"); v != "" {
+		out.italic = v == "1" || v == "true"
+	}
+	switch v := rPr.Attr("u"); v {
+	case "":
+	case "none":
+		out.under = false
+	default:
 		out.under = true
 	}
-	if s := rPr.Attr("strike"); s != "" && s != "noStrike" {
+	switch v := rPr.Attr("strike"); v {
+	case "":
+	case "noStrike":
+		out.strike = false
+	default:
 		out.strike = true
 	}
 	if c := solidColor(rPr, r.theme); c != "" {
@@ -741,10 +884,35 @@ func (r *renderer) parseRunStyle(rPr *ooxml.Node, base runStyle) runStyle {
 			out.highlight = r.theme[c.Attr("val")]
 		}
 	}
-	if latin := rPr.Child("latin"); latin != nil {
-		out.font = safeFont(latin.Attr("typeface"))
+	if font := r.runFont(rPr); font != "" {
+		out.font = font
 	}
 	return out
+}
+
+// runFont resolves a run's latin typeface, falling back to its East Asian
+// typeface. Theme references such as +mj-lt are expanded from the theme.
+func (r *renderer) runFont(rPr *ooxml.Node) string {
+	if rPr == nil {
+		return ""
+	}
+	if latin := rPr.Child("latin"); latin != nil {
+		if font := r.fontName(latin.Attr("typeface")); font != "" {
+			return font
+		}
+	}
+	if ea := rPr.Child("ea"); ea != nil {
+		return r.fontName(ea.Attr("typeface"))
+	}
+	return ""
+}
+
+func (r *renderer) fontName(typeface string) string {
+	typeface = strings.TrimSpace(typeface)
+	if strings.HasPrefix(typeface, "+") {
+		return r.themeFonts[strings.ToLower(typeface)]
+	}
+	return safeFont(typeface)
 }
 
 func (r *renderer) renderRun(n *ooxml.Node, base runStyle) string {
