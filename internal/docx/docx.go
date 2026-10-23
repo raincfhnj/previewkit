@@ -64,6 +64,12 @@ type numLevel struct {
 	Start  int
 }
 
+type docComment struct {
+	author string
+	date   string
+	node   *ooxml.Node
+}
+
 type renderer struct {
 	styles    *docStyles
 	rels      map[string]rel
@@ -80,6 +86,11 @@ type renderer struct {
 	footnoteSeen  map[string]bool
 	inFootnote    bool
 	curFootnote   int
+
+	comments     map[string]*docComment
+	commentOrder []string
+	commentSeen  map[string]bool
+	inComment    bool
 }
 
 // Render converts a DOCX document to an HTML fragment.
@@ -118,6 +129,7 @@ func Render(path string, opts Options) (template.HTML, error) {
 
 	theme := ooxml.ReadThemeColors(zr, "word/theme/", opts.MaxXMLBytes)
 	footnotes := parseFootnotes(zr, opts.MaxXMLBytes)
+	comments := parseComments(zr, opts.MaxXMLBytes)
 
 	var st *docStyles
 	if data, err := ooxml.ReadZipFileLimited(zr, "word/styles.xml", opts.MaxXMLBytes); err == nil {
@@ -146,6 +158,8 @@ func Render(path string, opts Options) (template.HTML, error) {
 		theme:        theme,
 		footnotes:    footnotes,
 		footnoteSeen: map[string]bool{},
+		comments:     comments,
+		commentSeen:  map[string]bool{},
 	}
 
 	body := root.Child("body")
@@ -183,6 +197,7 @@ func Render(path string, opts Options) (template.HTML, error) {
 	}
 
 	r.renderFootnotes(&b)
+	r.renderComments(&b)
 	b.WriteString(`</div>`)
 	return template.HTML(b.String()), nil
 }
@@ -251,6 +266,89 @@ func (r *renderer) renderFootnotes(b *strings.Builder) {
 	}
 	b.WriteString(`</ol></section>`)
 	r.inFootnote = false
+}
+
+func parseComments(zr *zip.ReadCloser, limit int64) map[string]*docComment {
+	data, err := ooxml.ReadZipFileLimited(zr, "word/comments.xml", limit)
+	if err != nil {
+		return nil
+	}
+	root, err := ooxml.ParseXML(data)
+	if err != nil {
+		return nil
+	}
+
+	out := map[string]*docComment{}
+	for _, c := range root.Children("comment") {
+		id := c.Attr("id")
+		if id == "" {
+			continue
+		}
+		out[id] = &docComment{
+			author: c.Attr("author"),
+			date:   c.Attr("date"),
+			node:   c,
+		}
+	}
+	return out
+}
+
+func (r *renderer) commentRef(n *ooxml.Node) string {
+	if r.inComment {
+		return ""
+	}
+	id := n.Attr("id")
+	c, ok := r.comments[id]
+	if !ok || c == nil {
+		return ""
+	}
+
+	num := 0
+	if !r.commentSeen[id] {
+		r.commentSeen[id] = true
+		r.commentOrder = append(r.commentOrder, id)
+		num = len(r.commentOrder)
+	} else {
+		for i, v := range r.commentOrder {
+			if v == id {
+				num = i + 1
+				break
+			}
+		}
+	}
+
+	return `<sup class="pk-docx-comment-ref"><a href="#comment-` +
+		html.EscapeString(id) + `">[` + strconv.Itoa(num) + `]</a></sup>`
+}
+
+func (r *renderer) renderComments(b *strings.Builder) {
+	if len(r.commentOrder) == 0 {
+		return
+	}
+
+	r.inComment = true
+	b.WriteString(`<section class="pk-docx-comments"><ol>`)
+	for _, id := range r.commentOrder {
+		c := r.comments[id]
+		if c == nil {
+			continue
+		}
+		b.WriteString(`<li id="comment-` + html.EscapeString(id) + `">`)
+
+		meta := c.author
+		if meta != "" && c.date != "" {
+			meta += " · "
+		}
+		meta += c.date
+		if meta != "" {
+			b.WriteString(`<div class="pk-docx-comment-meta">` + html.EscapeString(meta) + `</div>`)
+		}
+
+		r.renderBlocks(b, c.node)
+		b.WriteString(`</li>`)
+	}
+	b.WriteString(`</ol></section>`)
+	r.inComment = false
 }
 
 func findLast(n *ooxml.Node, local string) *ooxml.Node {
@@ -741,10 +839,15 @@ func (r *renderer) renderParagraph(b *strings.Builder, p *ooxml.Node) {
 			content.WriteString(r.renderRun(n, st.Char))
 		case "hyperlink":
 			content.WriteString(r.renderHyperlink(n, st.Char))
-		case "ins":
-			for _, c := range n.Children("r") {
-				content.WriteString(r.renderRun(c, st.Char))
-			}
+		case "ins", "moveTo":
+			content.WriteString(r.renderTracked(n, st.Char, "ins"))
+		case "del", "moveFrom":
+			content.WriteString(r.renderTracked(n, st.Char, "del"))
+		case "commentReference":
+			content.WriteString(r.commentRef(n))
+		case "commentRangeStart", "commentRangeEnd":
+			// Ranges only mark the commented text; the reference is rendered
+			// separately and links to the comment section.
 		case "fldSimple":
 			for _, c := range n.Children("r") {
 				content.WriteString(r.renderRun(c, st.Char))
@@ -807,6 +910,33 @@ func (r *renderer) renderHyperlink(n *ooxml.Node, base charStyle) string {
 		`" target="_blank" rel="noopener noreferrer">` + content.String() + `</a>`
 }
 
+// renderTracked renders the contents of a tracked-change element. tag is "ins"
+// for insertions/moveTo and "del" for deletions/moveFrom. Tracked changes may
+// contain runs, direct text, or nested tracked-change elements.
+func (r *renderer) renderTracked(n *ooxml.Node, base charStyle, tag string) string {
+	var content strings.Builder
+	for _, c := range n.Nodes {
+		switch c.Name.Local {
+		case "r":
+			content.WriteString(r.renderRun(c, base))
+		case "hyperlink":
+			content.WriteString(r.renderHyperlink(c, base))
+		case "t", "delText":
+			content.WriteString(html.EscapeString(c.TextContent()))
+		case "ins", "moveTo":
+			content.WriteString(r.renderTracked(c, base, "ins"))
+		case "del", "moveFrom":
+			content.WriteString(r.renderTracked(c, base, "del"))
+		case "commentReference":
+			content.WriteString(r.commentRef(c))
+		}
+	}
+	if content.Len() == 0 {
+		return ""
+	}
+	return `<` + tag + ` class="pk-docx-` + tag + `">` + content.String() + `</` + tag + `>`
+}
+
 func (r *renderer) renderRun(n *ooxml.Node, base charStyle) string {
 	cs := base
 	if rPr := n.Child("rPr"); rPr != nil {
@@ -819,8 +949,16 @@ func (r *renderer) renderRun(n *ooxml.Node, base charStyle) string {
 	var content strings.Builder
 	for _, c := range n.Nodes {
 		switch c.Name.Local {
-		case "t":
+		case "t", "delText":
 			content.WriteString(html.EscapeString(c.TextContent()))
+		case "ins", "moveTo":
+			content.WriteString(r.renderTracked(c, cs, "ins"))
+		case "del", "moveFrom":
+			content.WriteString(r.renderTracked(c, cs, "del"))
+		case "commentReference":
+			content.WriteString(r.commentRef(c))
+		case "commentRangeStart", "commentRangeEnd":
+			// No-op range markers.
 		case "footnoteReference":
 			content.WriteString(r.footnoteRef(c))
 		case "footnoteRef":

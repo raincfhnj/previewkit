@@ -16,6 +16,7 @@ func TestRenderDOCX(t *testing.T) {
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
   <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
+  <Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
 </Types>`,
 		"word/_rels/document.xml.rels": `<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -61,6 +62,15 @@ func TestRenderDOCX(t *testing.T) {
     <w:p><w:r><w:footnoteRef/></w:r><w:r><w:t>脚注内容</w:t></w:r></w:p>
   </w:footnote>
 </w:footnotes>`,
+		"word/comments.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:comment w:id="1" w:author="张三" w:date="2024-01-02T03:04:05Z">
+    <w:p><w:r><w:t>批注内容</w:t></w:r></w:p>
+  </w:comment>
+  <w:comment w:id="2" w:author="李四" w:date="2024-02-03T00:00:00Z">
+    <w:p><w:r><w:t>第二条批注</w:t></w:r></w:p>
+  </w:comment>
+</w:comments>`,
 		"word/numbering.xml": `<?xml version="1.0" encoding="UTF-8"?>
 <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:abstractNum w:abstractNumId="0">
@@ -84,6 +94,21 @@ func TestRenderDOCX(t *testing.T) {
       <w:r><w:t>列表项</w:t></w:r>
     </w:p>
     <w:p><w:r><w:t>正文</w:t><w:footnoteReference w:id="1"/></w:r></w:p>
+    <w:p>
+      <w:commentRangeStart w:id="1"/>
+      <w:r><w:t>有批注的文字</w:t></w:r>
+      <w:r><w:commentReference w:id="1"/></w:r>
+      <w:commentRangeEnd w:id="1"/>
+      <w:r><w:t>重复引用</w:t><w:commentReference w:id="1"/></w:r>
+      <w:r><w:commentReference w:id="2"/></w:r>
+    </w:p>
+    <w:p>
+      <w:ins w:id="10" w:author="张三"><w:r><w:t>插入文字</w:t></w:r></w:ins>
+      <w:del w:id="11" w:author="张三"><w:r><w:delText>删除文字</w:delText></w:r></w:del>
+      <w:moveTo w:id="12"><w:r><w:t>移入文字</w:t></w:r></w:moveTo>
+      <w:moveFrom w:id="13"><w:r><w:delText>移走文字</w:delText></w:r></w:moveFrom>
+      <w:r><w:ins><w:t>运行级插入</w:t></w:ins><w:del><w:delText>运行级删除</w:delText></w:del></w:r>
+    </w:p>
     <w:tbl>
       <w:tr>
         <w:tc>
@@ -139,9 +164,35 @@ func TestRenderDOCX(t *testing.T) {
 		`class="pk-docx-fn-ref"`,
 		"脚注内容",
 		`class="pk-docx-footnotes"`,
+		`class="pk-docx-comment-ref"`,
+		`href="#comment-1"`,
+		"有批注的文字",
+		"批注内容",
+		`class="pk-docx-comment-meta"`,
+		"张三 · 2024-01-02T03:04:05Z",
+		"李四 · 2024-02-03T00:00:00Z",
+		`class="pk-docx-comments"`,
+		`id="comment-1"`,
+		`id="comment-2"`,
+		"第二条批注",
+		`class="pk-docx-ins"`,
+		"插入文字",
+		"移入文字",
+		"运行级插入",
+		`class="pk-docx-del"`,
+		"删除文字",
+		"移走文字",
+		"运行级删除",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("rendered HTML does not contain %q", want)
 		}
+	}
+
+	if got := strings.Count(s, `class="pk-docx-comment-ref"`); got != 3 {
+		t.Errorf("comment reference count = %d, want 3", got)
+	}
+	if got := strings.Count(s, `href="#comment-1"`); got != 2 {
+		t.Errorf("comment 1 reference count = %d, want 2 (deduplicated)", got)
 	}
 }
