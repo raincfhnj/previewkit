@@ -55,6 +55,12 @@ func TestRenderDOCX(t *testing.T) {
     </a:clrScheme>
   </a:themeElements>
 </a:theme>`,
+		"word/footnotes.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:footnote w:id="1">
+    <w:p><w:r><w:footnoteRef/></w:r><w:r><w:t>脚注内容</w:t></w:r></w:p>
+  </w:footnote>
+</w:footnotes>`,
 		"word/numbering.xml": `<?xml version="1.0" encoding="UTF-8"?>
 <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:abstractNum w:abstractNumId="0">
@@ -77,6 +83,7 @@ func TestRenderDOCX(t *testing.T) {
       <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>
       <w:r><w:t>列表项</w:t></w:r>
     </w:p>
+    <w:p><w:r><w:t>正文</w:t><w:footnoteReference w:id="1"/></w:r></w:p>
     <w:tbl>
       <w:tr>
         <w:tc>
@@ -129,6 +136,9 @@ func TestRenderDOCX(t *testing.T) {
 		"页眉",
 		`class="pk-docx-footer"`,
 		"页脚",
+		`class="pk-docx-fn-ref"`,
+		"脚注内容",
+		`class="pk-docx-footnotes"`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("rendered HTML does not contain %q", want)

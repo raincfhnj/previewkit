@@ -74,6 +74,12 @@ type renderer struct {
 	listCounters map[string]int
 	imageTotal   int
 	theme        map[string]string
+
+	footnotes     map[string]*ooxml.Node
+	footnoteOrder []string
+	footnoteSeen  map[string]bool
+	inFootnote    bool
+	curFootnote   int
 }
 
 // Render converts a DOCX document to an HTML fragment.
@@ -111,6 +117,7 @@ func Render(path string, opts Options) (template.HTML, error) {
 	}
 
 	theme := ooxml.ReadThemeColors(zr, "word/theme/", opts.MaxXMLBytes)
+	footnotes := parseFootnotes(zr, opts.MaxXMLBytes)
 
 	var st *docStyles
 	if data, err := ooxml.ReadZipFileLimited(zr, "word/styles.xml", opts.MaxXMLBytes); err == nil {
@@ -137,6 +144,8 @@ func Render(path string, opts Options) (template.HTML, error) {
 		opts:         opts,
 		listCounters: map[string]int{},
 		theme:        theme,
+		footnotes:    footnotes,
+		footnoteSeen: map[string]bool{},
 	}
 
 	body := root.Child("body")
@@ -173,8 +182,75 @@ func Render(path string, opts Options) (template.HTML, error) {
 		}
 	}
 
+	r.renderFootnotes(&b)
 	b.WriteString(`</div>`)
 	return template.HTML(b.String()), nil
+}
+
+func parseFootnotes(zr *zip.ReadCloser, limit int64) map[string]*ooxml.Node {
+	data, err := ooxml.ReadZipFileLimited(zr, "word/footnotes.xml", limit)
+	if err != nil {
+		return nil
+	}
+	root, err := ooxml.ParseXML(data)
+	if err != nil {
+		return nil
+	}
+
+	out := map[string]*ooxml.Node{}
+	for _, fn := range root.Children("footnote") {
+		id := fn.Attr("id")
+		if id == "" || id == "-1" || id == "0" {
+			continue
+		}
+		out[id] = fn
+	}
+	return out
+}
+
+func (r *renderer) footnoteRef(n *ooxml.Node) string {
+	if r.inFootnote {
+		return ""
+	}
+	id := n.Attr("id")
+	fn, ok := r.footnotes[id]
+	if !ok || fn == nil {
+		return ""
+	}
+
+	num := 0
+	if !r.footnoteSeen[id] {
+		r.footnoteSeen[id] = true
+		r.footnoteOrder = append(r.footnoteOrder, id)
+		num = len(r.footnoteOrder)
+	} else {
+		for i, v := range r.footnoteOrder {
+			if v == id {
+				num = i + 1
+				break
+			}
+		}
+	}
+
+	return `<sup class="pk-docx-fn-ref"><a href="#fn-` + html.EscapeString(id) +
+		`" id="fnref-` + html.EscapeString(id) + `">[` + strconv.Itoa(num) + `]</a></sup>`
+}
+
+func (r *renderer) renderFootnotes(b *strings.Builder) {
+	if len(r.footnoteOrder) == 0 {
+		return
+	}
+
+	r.inFootnote = true
+	b.WriteString(`<section class="pk-docx-footnotes"><ol>`)
+	for i, id := range r.footnoteOrder {
+		r.curFootnote = i + 1
+		b.WriteString(`<li id="fn-` + html.EscapeString(id) + `">`)
+		r.renderBlocks(b, r.footnotes[id])
+		b.WriteString(`</li>`)
+	}
+	b.WriteString(`</ol></section>`)
+	r.inFootnote = false
 }
 
 func findLast(n *ooxml.Node, local string) *ooxml.Node {
@@ -745,6 +821,12 @@ func (r *renderer) renderRun(n *ooxml.Node, base charStyle) string {
 		switch c.Name.Local {
 		case "t":
 			content.WriteString(html.EscapeString(c.TextContent()))
+		case "footnoteReference":
+			content.WriteString(r.footnoteRef(c))
+		case "footnoteRef":
+			if r.inFootnote {
+				content.WriteString(`<sup class="pk-docx-fn-ref">[` + strconv.Itoa(r.curFootnote) + `]</sup>`)
+			}
 		case "tab":
 			content.WriteString("\t")
 		case "br":

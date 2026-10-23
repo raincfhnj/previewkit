@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.8.0
+
+- DOCX: render footnote references and a footnotes section.
+- DOCX: support footnoteRef markers inside footnote content.
+- Added footnote fixture coverage.
+
 ## v0.7.0
 
 - DOCX: render default section headers and footers.
